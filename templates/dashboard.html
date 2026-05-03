@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <div>
+    <h1 class="h3 mb-1">Dashboard</h1>
+    <p class="text-secondary mb-0">{{ user.name }} · {{ user.role }} · {{ user.status }}</p>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body">
+        <div class="text-secondary small">Members</div>
+        <div class="fs-3 fw-semibold">{{ member_count }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body">
+        <div class="text-secondary small">Pending Approval</div>
+        <div class="fs-3 fw-semibold">{{ pending_count }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body">
+        <div class="text-secondary small">Payments</div>
+        <div class="fs-3 fw-semibold">{{ payment_count }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body">
+        <div class="text-secondary small">Votes</div>
+        <div class="fs-3 fw-semibold">{{ vote_count }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

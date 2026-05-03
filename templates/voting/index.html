@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h3 mb-3">Voting</h1>
+<div class="table-responsive bg-white border rounded">
+  <table class="table table-hover mb-0">
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Open</th>
+        <th>Close</th>
+        <th>Options</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for vote in votes %}
+      <tr>
+        <td>{{ vote.title }}</td>
+        <td>{{ vote.open_date }}</td>
+        <td>{{ vote.close_date }}</td>
+        <td>{{ vote.options|length }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="text-secondary">No votes yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
