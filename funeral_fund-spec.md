@@ -2,11 +2,104 @@
 
 ## Version
 
-1.0.0
+1.1.0
 
 ## Solution Name
 
 **FuneralFund** (default; branding configurable by leadership)
+
+---
+
+# 0. Implementation Baseline
+
+This repository implements a Flask-based MVP that keeps the production architecture intact while providing a runnable local application.
+
+## MVP Scope
+
+Included in the initial implementation:
+
+* Flask application factory
+* SQLAlchemy models for users, family members, fees, notices, payments, votes, settings, and audit logs
+* SQLite local development database with PostgreSQL-compatible SQLAlchemy models
+* Jinja2 dashboard and management pages
+* JSON API endpoints for members, family, fees, payments, voting, reports, and settings
+* Role and status checks for protected operations
+* Manual payment proof workflow
+* Scheduled-job-ready dependant age-out service
+* Pytest coverage for core lifecycle rules and API behavior
+
+Deferred production integrations:
+
+* Live OIDC token exchange and JWKS validation
+* Live payment provider APIs
+* WhatsApp provider integration
+* Azure Blob Storage uploads
+* Azure Key Vault secret loading
+* PDF/XLSX report generation
+* Celery worker deployment
+
+Deferred integrations must be represented by explicit service boundaries so they can be enabled without changing route contracts.
+
+## Local Development Defaults
+
+Local variables are defined in `.env` and documented in `.env.example`.
+
+```env
+FLASK_APP=funeral_fund:create_app
+FUNERAL_FUND_ENV=development
+DATABASE_URL=sqlite:///funeral_fund.db
+SECRET_KEY=dev-secret-change-me
+DEFAULT_ADMIN_EMAIL=admin@example.test
+DEFAULT_ADMIN_NAME=Local Admin
+CLIENT_ID=pamodzi_cc
+CLIENT_SECRET=
+REDIRECT_URI=https://iam.zambeziblue.com/callback
+LOCAL_REDIRECT_URI=http://localhost:8003/auth/callback
+OIDC_OPENID_CONFIG_URL=https://iam.zambeziblue.com/.well-known/openid-configuration
+JWKS_URL=https://iam.zambeziblue.com/.well-known/jwks.json
+SIGNUP_URL=https://iam.zambeziblue.com/signup
+```
+
+Local authentication uses development headers for testing:
+
+* `X-User-Email`
+* `X-User-Name`
+* `X-User-Groups`
+
+When those headers are absent, the app creates a default local sys admin for development only.
+
+## Authorization Rules
+
+All mutating leadership routes require either `admin` or `community_leader`.
+
+Member self-service routes require an authenticated active or pending member. Voting requires:
+
+* status = `active`
+* role = `member` or higher
+* age >= 21
+* exactly one vote per vote event
+
+## Payment Verification Rules
+
+Payment records begin as `pending`. Leadership can mark payment proof as:
+
+* `verified`
+* `rejected`
+
+Verified recurring membership payments may activate a pending member when leadership approves the member.
+
+## Data Retention And Audit
+
+Every mutating endpoint writes an audit log with:
+
+* actor user id
+* action
+* target type
+* target id
+* JSON metadata
+* timestamp
+
+GDPR deletion is implemented as a service boundary in the MVP and requires an admin role before production activation.
 
 ---
 
@@ -686,4 +779,3 @@ The platform is complete when:
 * Azure deployment automated
 * Branding configurable
 * Audit complete
-
