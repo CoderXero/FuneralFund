@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h3 mb-3">Member</h1>
+
+<div class="bg-white border rounded p-3 mb-4">
+  <div class="row g-3">
+    <div class="col-md-4">
+      <div class="text-secondary small">Name</div>
+      <div class="fw-semibold">{{ user.name }}</div>
+    </div>
+    <div class="col-md-4">
+      <div class="text-secondary small">Email</div>
+      <div class="fw-semibold">{{ user.email }}</div>
+    </div>
+    <div class="col-md-2">
+      <div class="text-secondary small">Role</div>
+      <div class="fw-semibold">{{ user.role }}</div>
+    </div>
+    <div class="col-md-2">
+      <div class="text-secondary small">Status</div>
+      <div class="fw-semibold">{{ user.status }}</div>
+    </div>
+  </div>
+</div>
+
+<h2 class="h4 mb-3">Family group</h2>
+<form action="/my/family" method="post" class="bg-white border rounded p-3 mb-4">
+  <div class="row g-3 align-items-end">
+    <div class="col-md-3">
+      <label class="form-label" for="name">Name</label>
+      <input class="form-control" id="name" name="name" required>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="relationship">Relationship</label>
+      <input class="form-control" id="relationship" name="relationship">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="category">Category</label>
+      <select class="form-select" id="category" name="category">
+        <option value="dependant">Dependant</option>
+        <option value="relative">Relative</option>
+        <option value="secondary">Secondary</option>
+        <option value="primary">Primary</option>
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="dob">Date of birth</label>
+      <input class="form-control" id="dob" name="dob" type="date">
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary" type="submit">Add family member</button>
+    </div>
+  </div>
+</form>
+
+<div class="table-responsive bg-white border rounded">
+  <table class="table table-hover mb-0">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Relationship</th>
+        <th>Category</th>
+        <th>Status</th>
+        <th class="text-end">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for family in family_members %}
+      <tr>
+        <td>{{ family.name }}</td>
+        <td>{{ family.relationship or "" }}</td>
+        <td>{{ family.category }}</td>
+        <td>{{ family.status }}</td>
+        <td class="text-end">
+          <form action="/my/family/{{ family.id }}/delete" method="post">
+            <button class="btn btn-sm btn-outline-danger" type="submit">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-secondary">No family members yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

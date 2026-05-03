@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h3 mb-3">Messages</h1>
+
+<form action="/my/messages" method="post" class="bg-white border rounded p-3 mb-4">
+  <div class="row g-3">
+    <div class="col-md-4">
+      <label class="form-label" for="subject">Subject</label>
+      <input class="form-control" id="subject" name="subject" required>
+    </div>
+    <div class="col-md-8">
+      <label class="form-label" for="body">Message to leadership</label>
+      <textarea class="form-control" id="body" name="body" rows="3" required></textarea>
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary" type="submit">Send to leadership</button>
+    </div>
+  </div>
+</form>
+
+<div class="list-group">
+  {% for message in messages %}
+  <div class="list-group-item">
+    <div class="d-flex justify-content-between gap-3">
+      <h2 class="h6 mb-1">{{ message.subject }}</h2>
+      <span class="text-secondary small">{{ message.created_at.date() }}</span>
+    </div>
+    <p class="mb-1">{{ message.body }}</p>
+    <div class="text-secondary small">
+      {% if message.sender %}From {{ message.sender.name }}{% else %}System{% endif %}
+      {% if message.audience != "direct" %} · {{ message.audience }}{% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="bg-white border rounded p-3 text-secondary">No messages yet.</div>
+  {% endfor %}
+</div>
+{% endblock %}

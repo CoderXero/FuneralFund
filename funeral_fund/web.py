@@ -1,39 +1,636 @@
 from __future__ import annotations
 
-from flask import Blueprint, render_template
+from datetime import date
+from decimal import Decimal, InvalidOperation
+from io import BytesIO
+from urllib.parse import quote
 
-from .auth import current_user
-from .models import Payment, User, Vote
+from flask import Blueprint, Response, flash, redirect, render_template, request, session, url_for
+import qrcode
+import qrcode.image.svg
+from sqlalchemy import or_
+
+from .auth import current_user, login_required, require_roles
+from .extensions import db
+from .models import FamilyMember, Fee, Message, Notice, Payment, Setting, User, Vote, VoteCast, VoteOption
+from .services import age_on, approve_member, audit, verify_payment
 
 web_bp = Blueprint("web", __name__)
 
+PAYMENT_PROVIDERS = {
+    "cashapp": "Cash App",
+    "venmo": "Venmo",
+    "zelle": "Zelle",
+}
 
-@web_bp.get("/")
-def dashboard():
-    user = current_user()
-    return render_template(
-        "dashboard.html",
-        user=user,
-        member_count=User.query.count(),
-        pending_count=User.query.filter_by(status="pending").count(),
-        payment_count=Payment.query.count(),
-        vote_count=Vote.query.count(),
+PAYMENT_OPTION_FIELDS = [
+    "enabled",
+    "display_name",
+    "handle",
+    "payment_url",
+    "api_base_url",
+    "api_key",
+    "webhook_secret",
+]
+
+
+@web_bp.get("/favicon.ico")
+def favicon():
+    return Response(status=204)
+
+
+def parse_form_date(value: str | None) -> date | None:
+    return date.fromisoformat(value) if value else None
+
+
+def parse_form_decimal(value: str | None) -> Decimal:
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("Amount must be a decimal number") from exc
+    if amount <= 0:
+        raise ValueError("Amount must be greater than zero")
+    return amount
+
+
+def settings_dict() -> dict[str, str]:
+    return {setting.key: setting.value for setting in Setting.query.all()}
+
+
+def setting_value(settings: dict[str, str], provider: str, field: str) -> str:
+    return settings.get(f"payment_{provider}_{field}", "")
+
+
+def payment_qr_value(settings: dict[str, str], provider: str) -> str | None:
+    payment_url = setting_value(settings, provider, "payment_url").strip()
+    handle = setting_value(settings, provider, "handle").strip()
+    if payment_url:
+        return payment_url
+    if not handle:
+        return None
+    if provider == "cashapp":
+        normalized = handle if handle.startswith("$") else f"${handle}"
+        return f"https://cash.app/{quote(normalized)}"
+    if provider == "venmo":
+        return f"https://venmo.com/u/{quote(handle.lstrip('@'))}"
+    if provider == "zelle":
+        return f"ZELLE:{handle}"
+    return handle
+
+
+def active_payment_options(settings: dict[str, str]) -> list[dict[str, str]]:
+    options = []
+    for provider, label in PAYMENT_PROVIDERS.items():
+        if setting_value(settings, provider, "enabled") != "1":
+            continue
+        if not payment_qr_value(settings, provider):
+            continue
+        options.append(
+            {
+                "provider": provider,
+                "label": setting_value(settings, provider, "display_name") or label,
+                "handle": setting_value(settings, provider, "handle"),
+                "payment_url": setting_value(settings, provider, "payment_url"),
+            }
+        )
+    return options
+
+
+def user_setting_key(user: User, key: str) -> str:
+    return f"user_{user.id}_{key}"
+
+
+def user_settings(user: User) -> dict[str, str]:
+    prefix = f"user_{user.id}_"
+    return {
+        setting.key.removeprefix(prefix): setting.value
+        for setting in Setting.query.filter(Setting.key.startswith(prefix)).all()
+    }
+
+
+def set_user_setting(user: User, key: str, value: str) -> None:
+    setting_key = user_setting_key(user, key)
+    setting = db.session.get(Setting, setting_key) or Setting(key=setting_key, value="")
+    setting.value = value
+    db.session.add(setting)
+
+
+def visible_messages(user: User) -> list[Message]:
+    audiences = ["all"]
+    if user.role == "member":
+        audiences.append("community_user")
+    if user.is_leadership:
+        audiences.extend(["community_user", "community_leader", "leadership"])
+        return (
+            Message.query.filter(
+                or_(
+                    Message.recipient_id == user.id,
+                    Message.sender_id == user.id,
+                    Message.audience.in_(audiences),
+                )
+            )
+            .order_by(Message.created_at.desc())
+            .all()
+        )
+    return (
+        Message.query.filter(or_(Message.recipient_id == user.id, Message.audience.in_(audiences)))
+        .order_by(Message.created_at.desc())
+        .all()
     )
 
 
+def landing_user() -> User | None:
+    if session.get("user_id"):
+        return db.session.get(User, session["user_id"])
+    if request.headers.get("X-User-Email"):
+        return current_user()
+    return None
+
+
+@web_bp.get("/")
+def landing_page():
+    return render_template(
+        "landing.html",
+        user=landing_user(),
+        latest_notice=Notice.query.order_by(Notice.created_at.desc()).first(),
+    )
+
+
+@web_bp.get("/dashboard")
+def dashboard():
+    user = current_user()
+    if user.is_leadership:
+        member_count = User.query.count()
+        pending_count = User.query.filter_by(status="pending").count()
+        payments = Payment.query
+        vote_count = Vote.query.count()
+    else:
+        member_count = 1
+        pending_count = 1 if user.status == "pending" else 0
+        payments = Payment.query.filter_by(member_id=user.id)
+        vote_count = 0
+    return render_template(
+        "dashboard.html",
+        user=user,
+        member_count=member_count,
+        pending_count=pending_count,
+        payment_count=payments.count(),
+        vote_count=vote_count,
+    )
+
+
+@web_bp.get("/my/family")
+@login_required
+def member_family_redirect():
+    return redirect(url_for("web.member_page"))
+
+
+@web_bp.get("/my/member")
+@login_required
+def member_page():
+    user = current_user()
+    return render_template(
+        "member/member.html",
+        user=user,
+        family_members=FamilyMember.query.filter_by(user_id=user.id).order_by(FamilyMember.created_at.desc()).all(),
+    )
+
+
+@web_bp.post("/my/family")
+@login_required
+def member_family_create_page():
+    user = current_user()
+    family = FamilyMember(
+        user_id=user.id,
+        name=request.form["name"],
+        category=request.form.get("category", "dependant"),
+        relationship=request.form.get("relationship") or None,
+        dob=parse_form_date(request.form.get("dob")),
+    )
+    db.session.add(family)
+    db.session.flush()
+    audit(user, "family.create", "family_member", family.id, source="web")
+    db.session.commit()
+    flash("Family member added.", "success")
+    return redirect(url_for("web.member_page"))
+
+
+@web_bp.post("/my/family/<int:family_id>/delete")
+@login_required
+def member_family_delete_page(family_id: int):
+    user = current_user()
+    family = db.get_or_404(FamilyMember, family_id)
+    if family.user_id != user.id and not user.is_leadership:
+        return Response(status=403)
+    audit(user, "family.delete", "family_member", family.id, source="web")
+    db.session.delete(family)
+    db.session.commit()
+    flash("Family member removed.", "success")
+    return redirect(url_for("web.member_page"))
+
+
+@web_bp.get("/my/settings")
+@login_required
+def member_settings_page():
+    user = current_user()
+    return render_template(
+        "member/settings.html",
+        user=user,
+        member_settings=user_settings(user),
+        payment_providers=PAYMENT_PROVIDERS,
+    )
+
+
+@web_bp.post("/my/settings")
+@login_required
+def member_settings_update_page():
+    user = current_user()
+    user.name = request.form.get("name") or user.name
+    user.dob = parse_form_date(request.form.get("dob"))
+    for key in [
+        "whatsapp_number",
+        "preferred_payment_provider",
+        "cashapp_handle",
+        "venmo_handle",
+        "zelle_handle",
+    ]:
+        set_user_setting(user, key, request.form.get(key, ""))
+    audit(user, "member.settings.update", "user", user.id, source="web")
+    db.session.commit()
+    flash("Profile settings saved.", "success")
+    return redirect(url_for("web.member_settings_page"))
+
+
+@web_bp.get("/my/messages")
+@login_required
+def member_messages_page():
+    user = current_user()
+    return render_template("member/messages.html", user=user, messages=visible_messages(user))
+
+
+@web_bp.post("/my/messages")
+@login_required
+def member_message_send_page():
+    user = current_user()
+    message = Message(
+        sender_id=user.id,
+        audience="leadership",
+        subject=request.form["subject"],
+        body=request.form["body"],
+    )
+    db.session.add(message)
+    db.session.flush()
+    audit(user, "message.send", "message", message.id, source="web", audience="leadership")
+    db.session.commit()
+    flash("Message sent to leadership.", "success")
+    return redirect(url_for("web.member_messages_page"))
+
+
+@web_bp.get("/my/payments")
+@login_required
+def member_payments_page():
+    user = current_user()
+    settings = settings_dict()
+    return render_template(
+        "member/payments.html",
+        user=user,
+        payments=Payment.query.filter_by(member_id=user.id).order_by(Payment.created_at.desc()).all(),
+        fees=Fee.query.filter_by(active=True).order_by(Fee.created_at.desc()).all(),
+        payment_options=active_payment_options(settings),
+    )
+
+
+@web_bp.post("/my/payments")
+@login_required
+def member_payment_create_page():
+    user = current_user()
+    try:
+        amount = parse_form_decimal(request.form.get("amount"))
+    except ValueError as exc:
+        flash(str(exc), "danger")
+        return redirect(url_for("web.member_payments_page"))
+    payment = Payment(
+        member_id=user.id,
+        fee_id=request.form.get("fee_id") or None,
+        method=request.form.get("method", "manual"),
+        amount=amount,
+    )
+    db.session.add(payment)
+    db.session.flush()
+    audit(user, "payment.initiate", "payment", payment.id, source="web")
+    db.session.commit()
+    flash("Payment started. Add proof after sending payment.", "success")
+    return redirect(url_for("web.member_payments_page"))
+
+
+@web_bp.post("/my/payments/<int:payment_id>/proof")
+@login_required
+def member_payment_proof_page(payment_id: int):
+    user = current_user()
+    payment = db.get_or_404(Payment, payment_id)
+    if payment.member_id != user.id and not user.is_leadership:
+        return Response(status=403)
+    payment.proof_url = request.form.get("proof_url") or None
+    payment.transaction_id = request.form.get("transaction_id") or None
+    payment.notes = request.form.get("notes") or None
+    audit(user, "payment.proof", "payment", payment.id, source="web")
+    db.session.commit()
+    flash("Payment proof saved.", "success")
+    return redirect(url_for("web.member_payments_page"))
+
+
+@web_bp.get("/my/voting")
+@login_required
+def member_voting_page():
+    user = current_user()
+    today = date.today()
+    votes = Vote.query.filter(Vote.open_date <= today, Vote.close_date >= today).order_by(Vote.close_date.asc()).all()
+    casts = {cast.vote_id: cast for cast in VoteCast.query.filter_by(member_id=user.id).all()}
+    user_age = age_on(user.dob)
+    eligible = user.status == "active" and user_age is not None and user_age >= 21
+    return render_template("member/voting.html", user=user, votes=votes, casts=casts, eligible=eligible)
+
+
+@web_bp.post("/my/voting/<int:vote_id>/cast")
+@login_required
+def member_vote_cast_page(vote_id: int):
+    user = current_user()
+    vote = db.get_or_404(Vote, vote_id)
+    today = date.today()
+    user_age = age_on(user.dob)
+    if not (vote.open_date <= today <= vote.close_date):
+        flash("This vote is closed.", "danger")
+        return redirect(url_for("web.member_voting_page"))
+    if user.status != "active" or user_age is None or user_age < 21:
+        flash("You are not eligible to vote.", "danger")
+        return redirect(url_for("web.member_voting_page"))
+    if VoteCast.query.filter_by(vote_id=vote.id, member_id=user.id).one_or_none():
+        flash("Your vote has already been recorded.", "warning")
+        return redirect(url_for("web.member_voting_page"))
+    option = VoteOption.query.filter_by(id=request.form["option_id"], vote_id=vote.id).one_or_none()
+    if option is None:
+        flash("Choose a valid option.", "danger")
+        return redirect(url_for("web.member_voting_page"))
+    cast = VoteCast(vote_id=vote.id, option_id=option.id, member_id=user.id)
+    db.session.add(cast)
+    audit(user, "vote.cast", "vote", vote.id, source="web")
+    db.session.commit()
+    flash("Vote recorded.", "success")
+    return redirect(url_for("web.member_voting_page"))
+
+
+@web_bp.get("/admin")
+@require_roles("admin", "leader")
+def admin_page():
+    return render_template(
+        "admin/index.html",
+        user=current_user(),
+        member_count=User.query.count(),
+        pending_payments=Payment.query.filter_by(status="pending").count(),
+        open_votes=Vote.query.filter(Vote.open_date <= date.today(), Vote.close_date >= date.today()).count(),
+        leadership_messages=Message.query.filter_by(audience="leadership").count(),
+    )
+
+
+@web_bp.get("/admin/messages")
+@require_roles("admin", "leader")
+def admin_messages_page():
+    user = current_user()
+    return render_template(
+        "admin/messages.html",
+        user=user,
+        messages=visible_messages(user),
+        members=User.query.order_by(User.name.asc()).all(),
+    )
+
+
+@web_bp.post("/admin/messages")
+@require_roles("admin", "leader")
+def admin_message_send_page():
+    user = current_user()
+    recipient_id = request.form.get("recipient_id") or None
+    message = Message(
+        sender_id=user.id,
+        recipient_id=int(recipient_id) if recipient_id else None,
+        audience=request.form.get("audience", "all") if not recipient_id else "direct",
+        subject=request.form["subject"],
+        body=request.form["body"],
+    )
+    db.session.add(message)
+    db.session.flush()
+    audit(user, "message.send", "message", message.id, source="web", audience=message.audience)
+    db.session.commit()
+    flash("Message sent.", "success")
+    return redirect(url_for("web.admin_messages_page"))
+
+
 @web_bp.get("/members")
+@require_roles("admin", "leader")
 def members_page():
-    current_user()
-    return render_template("members/index.html", members=User.query.order_by(User.created_at.desc()).all())
+    return render_template(
+        "members/index.html",
+        user=current_user(),
+        members=User.query.order_by(User.created_at.desc()).all(),
+    )
+
+
+@web_bp.post("/members")
+@require_roles("admin", "leader")
+def members_create_page():
+    actor = current_user()
+    member = User(
+        email=request.form["email"],
+        name=request.form.get("name") or request.form["email"],
+        role=request.form.get("role", "member"),
+        status=request.form.get("status", "pending"),
+        dob=parse_form_date(request.form.get("dob")),
+    )
+    db.session.add(member)
+    db.session.flush()
+    audit(actor, "member.create", "user", member.id, source="web")
+    db.session.commit()
+    flash("Member created.", "success")
+    return redirect(url_for("web.members_page"))
+
+
+@web_bp.post("/members/<int:member_id>/approve")
+@require_roles("admin", "leader")
+def members_approve_page(member_id: int):
+    approve_member(db.get_or_404(User, member_id), current_user())
+    db.session.commit()
+    flash("Member approved.", "success")
+    return redirect(url_for("web.members_page"))
+
+
+@web_bp.post("/members/<int:member_id>/promote")
+@require_roles("admin", "leader")
+def members_promote_page(member_id: int):
+    actor = current_user()
+    member = db.get_or_404(User, member_id)
+    member.role = "leader"
+    audit(actor, "member.promote", "user", member.id, source="web")
+    db.session.commit()
+    flash("Member promoted to leadership.", "success")
+    return redirect(url_for("web.members_page"))
+
+
+@web_bp.post("/members/<int:member_id>/suspend")
+@require_roles("admin", "leader")
+def members_suspend_page(member_id: int):
+    actor = current_user()
+    member = db.get_or_404(User, member_id)
+    member.status = "suspended"
+    audit(actor, "member.suspend", "user", member.id, source="web")
+    db.session.commit()
+    flash("Member suspended.", "warning")
+    return redirect(url_for("web.members_page"))
 
 
 @web_bp.get("/payments")
+@require_roles("admin", "leader")
 def payments_page():
-    current_user()
-    return render_template("payments/index.html", payments=Payment.query.order_by(Payment.created_at.desc()).all())
+    return render_template(
+        "payments/index.html",
+        user=current_user(),
+        payments=Payment.query.order_by(Payment.created_at.desc()).all(),
+        fees=Fee.query.order_by(Fee.created_at.desc()).all(),
+    )
+
+
+@web_bp.post("/fees")
+@require_roles("admin", "leader")
+def fees_create_page():
+    actor = current_user()
+    try:
+        fee = Fee(
+            name=request.form["name"],
+            type=request.form.get("type", "one_time"),
+            amount=parse_form_decimal(request.form.get("amount")),
+            recurring_interval=request.form.get("recurring_interval") or None,
+        )
+    except ValueError as exc:
+        flash(str(exc), "danger")
+        return redirect(url_for("web.payments_page"))
+    db.session.add(fee)
+    db.session.flush()
+    audit(actor, "fee.create", "fee", fee.id, source="web", type=fee.type)
+    db.session.commit()
+    flash("Fee created.", "success")
+    return redirect(url_for("web.payments_page"))
+
+
+@web_bp.post("/payments/<int:payment_id>/verify")
+@require_roles("admin", "leader")
+def payments_verify_page(payment_id: int):
+    verify_payment(db.get_or_404(Payment, payment_id), current_user(), "verified")
+    db.session.commit()
+    flash("Payment verified.", "success")
+    return redirect(url_for("web.payments_page"))
+
+
+@web_bp.post("/payments/<int:payment_id>/reject")
+@require_roles("admin", "leader")
+def payments_reject_page(payment_id: int):
+    verify_payment(db.get_or_404(Payment, payment_id), current_user(), "rejected")
+    db.session.commit()
+    flash("Payment rejected.", "warning")
+    return redirect(url_for("web.payments_page"))
 
 
 @web_bp.get("/voting")
+@require_roles("admin", "leader")
 def voting_page():
-    current_user()
-    return render_template("voting/index.html", votes=Vote.query.order_by(Vote.created_at.desc()).all())
+    votes = Vote.query.order_by(Vote.created_at.desc()).all()
+    vote_results = {
+        option.id: VoteCast.query.filter_by(vote_id=vote.id, option_id=option.id).count()
+        for vote in votes
+        for option in vote.options
+    }
+    return render_template(
+        "voting/index.html",
+        user=current_user(),
+        votes=votes,
+        vote_results=vote_results,
+    )
+
+
+@web_bp.post("/voting")
+@require_roles("admin", "leader")
+def voting_create_page():
+    actor = current_user()
+    labels = [
+        label.strip()
+        for label in [
+            request.form.get("option_1", ""),
+            request.form.get("option_2", ""),
+            request.form.get("option_3", ""),
+            request.form.get("option_4", ""),
+        ]
+        if label.strip()
+    ]
+    if len(labels) < 2:
+        flash("A vote requires at least two options.", "danger")
+        return redirect(url_for("web.voting_page"))
+    vote = Vote(
+        title=request.form["title"],
+        description=request.form.get("description") or None,
+        open_date=parse_form_date(request.form.get("open_date")) or date.today(),
+        close_date=parse_form_date(request.form.get("close_date")) or date.today(),
+    )
+    for label in labels:
+        vote.options.append(VoteOption(label=label))
+    db.session.add(vote)
+    db.session.flush()
+    audit(actor, "vote.create", "vote", vote.id, source="web")
+    db.session.commit()
+    flash("Vote created.", "success")
+    return redirect(url_for("web.voting_page"))
+
+
+@web_bp.get("/settings")
+@require_roles("admin", "leader")
+def settings_page():
+    settings = settings_dict()
+    return render_template(
+        "settings/index.html",
+        user=current_user(),
+        settings=settings,
+        payment_providers=PAYMENT_PROVIDERS,
+    )
+
+
+@web_bp.post("/settings")
+@require_roles("admin", "leader")
+def settings_update_page():
+    actor = current_user()
+    keys = ["brand_name", "contact_email", "payment_instructions", "whatsapp_number"]
+    for provider in PAYMENT_PROVIDERS:
+        for field in PAYMENT_OPTION_FIELDS:
+            keys.append(f"payment_{provider}_{field}")
+    for key in keys:
+        setting = db.session.get(Setting, key) or Setting(key=key, value="")
+        if key.endswith("_enabled"):
+            setting.value = "1" if request.form.get(key) == "1" else "0"
+        else:
+            setting.value = request.form.get(key, "")
+        db.session.add(setting)
+        audit(actor, "settings.update", "setting", key, source="web")
+    db.session.commit()
+    flash("Settings saved.", "success")
+    return redirect(url_for("web.settings_page"))
+
+
+@web_bp.get("/settings/payment-options/<provider>/qr.svg")
+@require_roles("admin", "leader", "member")
+def payment_option_qr(provider: str):
+    if provider not in PAYMENT_PROVIDERS:
+        return Response(status=404)
+    settings = settings_dict()
+    qr_value = payment_qr_value(settings, provider)
+    if not qr_value:
+        return Response(status=404)
+
+    image = qrcode.make(qr_value, image_factory=qrcode.image.svg.SvgPathImage)
+    buffer = BytesIO()
+    image.save(buffer)
+    return Response(buffer.getvalue(), mimetype="image/svg+xml")

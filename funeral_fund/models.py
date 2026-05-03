@@ -142,6 +142,22 @@ class VoteCast(db.Model):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
+class Message(db.Model):
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sender_id: Mapped[int | None] = mapped_column(db.ForeignKey("users.id"), nullable=True, index=True)
+    recipient_id: Mapped[int | None] = mapped_column(db.ForeignKey("users.id"), nullable=True, index=True)
+    audience: Mapped[str] = mapped_column(default="direct")
+    subject: Mapped[str]
+    body: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    read_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    sender: Mapped[User | None] = orm_relationship(foreign_keys=[sender_id])
+    recipient: Mapped[User | None] = orm_relationship(foreign_keys=[recipient_id])
+
+
 class Setting(db.Model):
     __tablename__ = "settings"
 

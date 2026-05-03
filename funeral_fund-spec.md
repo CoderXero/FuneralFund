@@ -49,24 +49,24 @@ FLASK_APP=funeral_fund:create_app
 FUNERAL_FUND_ENV=development
 DATABASE_URL=sqlite:///funeral_fund.db
 SECRET_KEY=dev-secret-change-me
-DEFAULT_ADMIN_EMAIL=admin@example.test
-DEFAULT_ADMIN_NAME=Local Admin
 CLIENT_ID=pamodzi_cc
 CLIENT_SECRET=
 REDIRECT_URI=https://iam.zambeziblue.com/callback
 LOCAL_REDIRECT_URI=http://localhost:8003/auth/callback
+OIDC_SCOPE=openid email profile groups
+OIDC_CODE_CHALLENGE_METHOD=S256
 OIDC_OPENID_CONFIG_URL=https://iam.zambeziblue.com/.well-known/openid-configuration
 JWKS_URL=https://iam.zambeziblue.com/.well-known/jwks.json
 SIGNUP_URL=https://iam.zambeziblue.com/signup
 ```
 
-Local authentication uses development headers for testing:
+Local authentication can use explicit development headers for testing:
 
 * `X-User-Email`
 * `X-User-Name`
 * `X-User-Groups`
 
-When those headers are absent, the app creates a default local sys admin for development only.
+When no IDP session or explicit development headers are present, protected routes return `401`.
 
 ## Authorization Rules
 
@@ -352,7 +352,15 @@ Scheduled daily job:
 
 ### API Integration
 
-When provider supports APIs
+Leadership can configure per-provider API settings:
+
+* API base URL
+* API key
+* Webhook secret
+* Enabled/disabled status
+
+Provider adapters are service boundaries. Cash App, Venmo, and Zelle can be enabled
+independently without changing payment route contracts.
 
 ### Payment Link / QR
 
@@ -471,6 +479,9 @@ Centralized settings page includes:
 * Late fees
 * Suspension days
 * Fiscal year dates
+* Payment options for Cash App, Venmo, and Zelle
+* Provider API credentials
+* Scannable provider QR codes
 
 ## IAM
 
@@ -492,6 +503,18 @@ Centralized settings page includes:
 * Session timeout
 * MFA toggle
 * Audit retention
+
+## Member Self-Service
+
+* `/my/member` for profile summary and family group management
+* `/my/payments` for current-user payment history, payment initiation, and proof submission
+* `/my/voting` for open and past votes
+* `/my/settings` for current-user profile, WhatsApp number, and payment preferences
+* `/my/messages` for broadcasts, direct messages, and messages to leadership
+
+## Admin Workspace
+
+Leadership users see an additional Admin tab for system-wide member, payment, voting, and message management.
 
 ---
 

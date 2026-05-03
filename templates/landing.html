@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="py-4 py-md-5">
+  <div class="row align-items-center g-4">
+    <div class="col-lg-7">
+      <h1 class="display-5 fw-semibold mb-3">FuneralFund</h1>
+      <p class="lead text-secondary mb-4">
+        Community support for funeral assistance, family records, payments, notices, and member voting.
+      </p>
+      {% if user %}
+      <a class="btn btn-primary" href="/dashboard">Open dashboard</a>
+      {% else %}
+      <a class="btn btn-primary" href="/auth/login">Sign in</a>
+      {% endif %}
+    </div>
+    <div class="col-lg-5">
+      <div class="bg-white border rounded p-4">
+        <div class="text-secondary small mb-2">Most recent notice</div>
+        {% if latest_notice %}
+        <h2 class="h5 mb-2">{{ latest_notice.title }}</h2>
+        <div class="d-flex justify-content-between gap-3 mb-2">
+          <span>{{ latest_notice.notice_number }}</span>
+          <span>{{ latest_notice.amount }}</span>
+        </div>
+        {% if latest_notice.due_date %}
+        <div class="text-secondary small">Due {{ latest_notice.due_date }}</div>
+        {% endif %}
+        {% else %}
+        <h2 class="h5 mb-2">No notices posted</h2>
+        <p class="text-secondary mb-0">Leadership notices will appear here when published.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="row g-3">
+  <div class="col-md-4">
+    <div class="bg-white border rounded p-3 h-100">
+      <h2 class="h5">Membership</h2>
+      <p class="text-secondary mb-0">Maintain member profiles, family records, and dependant lifecycle details.</p>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="bg-white border rounded p-3 h-100">
+      <h2 class="h5">Payments</h2>
+      <p class="text-secondary mb-0">Track dues, notices, manual proof, and supported payment options.</p>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="bg-white border rounded p-3 h-100">
+      <h2 class="h5">Governance</h2>
+      <p class="text-secondary mb-0">Run votes for eligible active members and report results to leadership.</p>
+    </div>
+  </div>
+</section>
+{% endblock %}

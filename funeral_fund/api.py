@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, jsonify, request
+from sqlalchemy.exc import IntegrityError
 
 from .auth import current_user, require_roles
 from .extensions import db
@@ -17,8 +18,49 @@ def payload() -> dict:
     return request.get_json(silent=True) or {}
 
 
-def parse_date(value: str | None) -> date | None:
-    return date.fromisoformat(value) if value else None
+def error(message: str, status_code: int = 400):
+    return jsonify({"error": message}), status_code
+
+
+def require_fields(data: dict, *fields: str) -> None:
+    missing = [field for field in fields if data.get(field) is None or data.get(field) == ""]
+    if missing:
+        raise ValueError(f"missing required field: {', '.join(missing)}")
+
+
+def parse_date(value: str | None, field: str = "date") -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an ISO date") from exc
+
+
+def parse_decimal(value: object, field: str = "amount") -> Decimal:
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{field} must be a decimal amount") from exc
+    if amount <= 0:
+        raise ValueError(f"{field} must be greater than zero")
+    return amount
+
+
+def validate_choice(value: str, field: str, choices: set[str]) -> None:
+    if value not in choices:
+        raise ValueError(f"{field} must be one of: {', '.join(sorted(choices))}")
+
+
+@api_bp.errorhandler(ValueError)
+def value_error(exc: ValueError):
+    return error(str(exc), 400)
+
+
+@api_bp.errorhandler(IntegrityError)
+def integrity_error(exc: IntegrityError):
+    db.session.rollback()
+    return error("request conflicts with existing data", 409)
 
 
 def user_json(user: User) -> dict:
@@ -42,13 +84,18 @@ def members_index():
 @require_roles("admin", "leader")
 def members_create():
     data = payload()
+    require_fields(data, "email")
     actor = current_user()
+    role = data.get("role", "member")
+    status = data.get("status", "pending")
+    validate_choice(role, "role", {"admin", "leader", "member"})
+    validate_choice(status, "status", {"active", "pending", "late", "suspended"})
     user = User(
         email=data["email"],
         name=data.get("name", data["email"]),
-        role=data.get("role", "member"),
-        status=data.get("status", "pending"),
-        dob=parse_date(data.get("dob")),
+        role=role,
+        status=status,
+        dob=parse_date(data.get("dob"), "dob"),
     )
     db.session.add(user)
     db.session.flush()
@@ -69,11 +116,15 @@ def members_update(member_id: int):
     data = payload()
     actor = current_user()
     user = db.get_or_404(User, member_id)
+    if "role" in data:
+        validate_choice(data["role"], "role", {"admin", "leader", "member"})
+    if "status" in data:
+        validate_choice(data["status"], "status", {"active", "pending", "late", "suspended"})
     for field in ["name", "role", "status"]:
         if field in data:
             setattr(user, field, data[field])
     if "dob" in data:
-        user.dob = parse_date(data["dob"])
+        user.dob = parse_date(data["dob"], "dob")
     audit(actor, "member.update", "user", user.id)
     db.session.commit()
     return jsonify(user_json(user))
@@ -117,12 +168,18 @@ def family_create(member_id: int):
     if actor.id != member_id and not actor.is_leadership:
         return jsonify({"error": "cannot modify another member family"}), 403
     data = payload()
+    require_fields(data, "name", "category")
+    validate_choice(
+        data["category"],
+        "category",
+        {"primary", "secondary", "dependant", "relative", "pending_member"},
+    )
     family = FamilyMember(
         user_id=member_id,
         name=data["name"],
         category=data["category"],
         relationship=data.get("relationship"),
-        dob=parse_date(data.get("dob")),
+        dob=parse_date(data.get("dob"), "dob"),
     )
     db.session.add(family)
     db.session.flush()
@@ -139,11 +196,19 @@ def family_update(family_id: int):
     if actor.id != family.user_id and not actor.is_leadership:
         return jsonify({"error": "cannot modify another member family"}), 403
     data = payload()
+    if "category" in data:
+        validate_choice(
+            data["category"],
+            "category",
+            {"primary", "secondary", "dependant", "relative", "pending_member"},
+        )
+    if "status" in data:
+        validate_choice(data["status"], "status", {"active", "pending", "inactive"})
     for field in ["name", "category", "relationship", "status"]:
         if field in data:
             setattr(family, field, data[field])
     if "dob" in data:
-        family.dob = parse_date(data["dob"])
+        family.dob = parse_date(data["dob"], "dob")
     audit(actor, "family.update", "family_member", family.id)
     db.session.commit()
     return jsonify({"id": family.id, "name": family.name, "category": family.category})
@@ -166,10 +231,11 @@ def family_delete(family_id: int):
 @require_roles("admin", "leader")
 def fees_recurring_create():
     data = payload()
+    require_fields(data, "name", "amount")
     fee = Fee(
         name=data["name"],
         type="recurring",
-        amount=Decimal(str(data["amount"])),
+        amount=parse_decimal(data["amount"]),
         recurring_interval=data.get("recurring_interval", "monthly"),
     )
     db.session.add(fee)
@@ -182,7 +248,8 @@ def fees_recurring_create():
 @require_roles("admin", "leader")
 def fees_one_time_create():
     data = payload()
-    fee = Fee(name=data["name"], type="one_time", amount=Decimal(str(data["amount"])))
+    require_fields(data, "name", "amount")
+    fee = Fee(name=data["name"], type="one_time", amount=parse_decimal(data["amount"]))
     db.session.add(fee)
     audit(current_user(), "fee.create", "fee", "pending", type="one_time")
     db.session.commit()
@@ -200,16 +267,22 @@ def notices_show(notice_number: str):
 @require_roles("admin", "leader", "member")
 def payments_initiate():
     data = payload()
+    require_fields(data, "amount")
     actor = current_user()
-    member_id = int(data.get("member_id", actor.id))
+    try:
+        member_id = int(data.get("member_id", actor.id))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("member_id must be an integer") from exc
     if actor.id != member_id and not actor.is_leadership:
         return jsonify({"error": "cannot initiate payment for another member"}), 403
+    if db.session.get(User, member_id) is None:
+        return error("member not found", 404)
     payment = Payment(
         member_id=member_id,
         fee_id=data.get("fee_id"),
         notice_id=data.get("notice_id"),
         method=data.get("method", "manual"),
-        amount=Decimal(str(data["amount"])),
+        amount=parse_decimal(data["amount"]),
     )
     db.session.add(payment)
     db.session.flush()
@@ -222,6 +295,7 @@ def payments_initiate():
 @require_roles("admin", "leader", "member")
 def payments_proof():
     data = payload()
+    require_fields(data, "payment_id")
     actor = current_user()
     payment = db.get_or_404(Payment, data["payment_id"])
     if actor.id != payment.member_id and not actor.is_leadership:
@@ -238,6 +312,7 @@ def payments_proof():
 @require_roles("admin", "leader")
 def payments_verify():
     data = payload()
+    require_fields(data, "payment_id", "status")
     payment = verify_payment(db.get_or_404(Payment, data["payment_id"]), current_user(), data["status"])
     db.session.commit()
     return jsonify({"id": payment.id, "status": payment.status})
@@ -247,14 +322,24 @@ def payments_verify():
 @require_roles("admin", "leader")
 def votes_create():
     data = payload()
+    require_fields(data, "title", "open_date", "close_date")
+    options = data.get("options", [])
+    if not isinstance(options, list) or len([option for option in options if str(option).strip()]) < 2:
+        raise ValueError("votes require at least two options")
+    open_date = parse_date(data["open_date"], "open_date") or date.today()
+    close_date = parse_date(data["close_date"], "close_date") or date.today()
+    if close_date < open_date:
+        raise ValueError("close_date must be on or after open_date")
     vote = Vote(
         title=data["title"],
         description=data.get("description"),
-        open_date=parse_date(data["open_date"]) or date.today(),
-        close_date=parse_date(data["close_date"]) or date.today(),
+        open_date=open_date,
+        close_date=close_date,
     )
-    for option in data.get("options", []):
-        vote.options.append(VoteOption(label=option))
+    for option in options:
+        label = str(option).strip()
+        if label:
+            vote.options.append(VoteOption(label=label))
     db.session.add(vote)
     db.session.flush()
     audit(current_user(), "vote.create", "vote", vote.id)
@@ -267,13 +352,20 @@ def votes_create():
 def votes_cast(vote_id: int):
     actor = current_user()
     data = payload()
+    require_fields(data, "option_id")
     vote = db.get_or_404(Vote, vote_id)
     today = date.today()
     if not (vote.open_date <= today <= vote.close_date):
         return jsonify({"error": "vote is closed"}), 400
-    if actor.status != "active" or (age_on(actor.dob) is not None and age_on(actor.dob) < 21):
+    actor_age = age_on(actor.dob)
+    if actor.status != "active" or actor_age is None or actor_age < 21:
         return jsonify({"error": "member is not eligible to vote"}), 403
-    cast = VoteCast(vote_id=vote.id, option_id=data["option_id"], member_id=actor.id)
+    option = VoteOption.query.filter_by(id=data["option_id"], vote_id=vote.id).one_or_none()
+    if option is None:
+        return error("option does not belong to this vote", 400)
+    if VoteCast.query.filter_by(vote_id=vote.id, member_id=actor.id).one_or_none():
+        return error("member has already voted", 409)
+    cast = VoteCast(vote_id=vote.id, option_id=option.id, member_id=actor.id)
     db.session.add(cast)
     audit(actor, "vote.cast", "vote", vote.id)
     db.session.commit()
@@ -312,7 +404,7 @@ def reports_yearly():
 @require_roles("admin", "leader")
 def reports_voter_roll():
     users = User.query.filter_by(status="active").all()
-    return jsonify([user_json(user) for user in users if age_on(user.dob) is None or age_on(user.dob) >= 21])
+    return jsonify([user_json(user) for user in users if age_on(user.dob) is not None and age_on(user.dob) >= 21])
 
 
 @api_bp.get("/settings")

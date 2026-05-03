@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h3 mb-3">Payments</h1>
+
+{% if payment_options %}
+<div class="row g-3 mb-4">
+  {% for option in payment_options %}
+  <div class="col-md-4">
+    <div class="bg-white border rounded p-3 h-100">
+      <h2 class="h6">{{ option.label }}</h2>
+      <img src="/settings/payment-options/{{ option.provider }}/qr.svg" alt="{{ option.label }} QR code" width="132" height="132" class="border rounded bg-white p-2 mb-2">
+      <div class="small text-secondary">{{ option.handle or option.payment_url }}</div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<form action="/my/payments" method="post" class="bg-white border rounded p-3 mb-4">
+  <div class="row g-3 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label" for="fee_id">Fee</label>
+      <select class="form-select" id="fee_id" name="fee_id">
+        <option value="">Other payment</option>
+        {% for fee in fees %}
+        <option value="{{ fee.id }}">{{ fee.name }} - {{ fee.amount }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="amount">Amount</label>
+      <input class="form-control" id="amount" name="amount" inputmode="decimal" required>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="method">Method</label>
+      <select class="form-select" id="method" name="method">
+        {% for option in payment_options %}
+        <option value="{{ option.provider }}">{{ option.label }}</option>
+        {% endfor %}
+        <option value="manual">Manual</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <button class="btn btn-primary w-100" type="submit">Start</button>
+    </div>
+  </div>
+</form>
+
+<div class="table-responsive bg-white border rounded">
+  <table class="table table-hover mb-0">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Method</th>
+        <th>Amount</th>
+        <th>Status</th>
+        <th>Proof</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for payment in payments %}
+      <tr>
+        <td>{{ payment.id }}</td>
+        <td>{{ payment.method }}</td>
+        <td>{{ payment.amount }}</td>
+        <td>{{ payment.status }}</td>
+        <td>
+          <form action="/my/payments/{{ payment.id }}/proof" method="post" class="row g-2">
+            <div class="col-md-4">
+              <input class="form-control form-control-sm" name="transaction_id" placeholder="Transaction ID" value="{{ payment.transaction_id or '' }}">
+            </div>
+            <div class="col-md-4">
+              <input class="form-control form-control-sm" name="proof_url" placeholder="Proof URL" value="{{ payment.proof_url or '' }}">
+            </div>
+            <div class="col-md-3">
+              <input class="form-control form-control-sm" name="notes" placeholder="Notes" value="{{ payment.notes or '' }}">
+            </div>
+            <div class="col-md-1">
+              <button class="btn btn-sm btn-outline-primary" type="submit">Save</button>
+            </div>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-secondary">No payments yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

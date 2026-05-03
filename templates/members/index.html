@@ -1,6 +1,45 @@
 {% extends "base.html" %}
 {% block content %}
-<h1 class="h3 mb-3">Members</h1>
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h1 class="h3 mb-0">Members</h1>
+</div>
+
+<form action="/members" method="post" class="bg-white border rounded p-3 mb-4">
+  <div class="row g-3 align-items-end">
+    <div class="col-md-3">
+      <label class="form-label" for="name">Name</label>
+      <input class="form-control" id="name" name="name">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="email">Email</label>
+      <input class="form-control" id="email" name="email" type="email" required>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="role">Role</label>
+      <select class="form-select" id="role" name="role">
+        <option value="member">Member</option>
+        <option value="leader">Leader</option>
+        <option value="admin">Admin</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="status">Status</label>
+      <select class="form-select" id="status" name="status">
+        <option value="pending">Pending</option>
+        <option value="active">Active</option>
+        <option value="suspended">Suspended</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="dob">Date of birth</label>
+      <input class="form-control" id="dob" name="dob" type="date">
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary" type="submit">Add member</button>
+    </div>
+  </div>
+</form>
+
 <div class="table-responsive bg-white border rounded">
   <table class="table table-hover mb-0">
     <thead>
@@ -9,6 +48,7 @@
         <th>Email</th>
         <th>Role</th>
         <th>Status</th>
+        <th class="text-end">Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -18,9 +58,28 @@
         <td>{{ member.email }}</td>
         <td>{{ member.role }}</td>
         <td>{{ member.status }}</td>
+        <td class="text-end">
+          <div class="d-inline-flex gap-2">
+            {% if member.status != "active" %}
+            <form action="/members/{{ member.id }}/approve" method="post">
+              <button class="btn btn-sm btn-outline-success" type="submit">Approve</button>
+            </form>
+            {% endif %}
+            {% if member.role == "member" %}
+            <form action="/members/{{ member.id }}/promote" method="post">
+              <button class="btn btn-sm btn-outline-primary" type="submit">Promote</button>
+            </form>
+            {% endif %}
+            {% if member.status != "suspended" %}
+            <form action="/members/{{ member.id }}/suspend" method="post">
+              <button class="btn btn-sm btn-outline-warning" type="submit">Suspend</button>
+            </form>
+            {% endif %}
+          </div>
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="4" class="text-secondary">No members yet.</td></tr>
+      <tr><td colspan="5" class="text-secondary">No members yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

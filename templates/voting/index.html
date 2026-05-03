@@ -1,6 +1,47 @@
 {% extends "base.html" %}
 {% block content %}
 <h1 class="h3 mb-3">Voting</h1>
+
+<form action="/voting" method="post" class="bg-white border rounded p-3 mb-4">
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label" for="title">Title</label>
+      <input class="form-control" id="title" name="title" required>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="open_date">Open date</label>
+      <input class="form-control" id="open_date" name="open_date" type="date" required>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="close_date">Close date</label>
+      <input class="form-control" id="close_date" name="close_date" type="date" required>
+    </div>
+    <div class="col-12">
+      <label class="form-label" for="description">Description</label>
+      <textarea class="form-control" id="description" name="description" rows="2"></textarea>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="option_1">Option 1</label>
+      <input class="form-control" id="option_1" name="option_1" required>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="option_2">Option 2</label>
+      <input class="form-control" id="option_2" name="option_2" required>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="option_3">Option 3</label>
+      <input class="form-control" id="option_3" name="option_3">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="option_4">Option 4</label>
+      <input class="form-control" id="option_4" name="option_4">
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary" type="submit">Create vote</button>
+    </div>
+  </div>
+</form>
+
 <div class="table-responsive bg-white border rounded">
   <table class="table table-hover mb-0">
     <thead>
@@ -9,6 +50,7 @@
         <th>Open</th>
         <th>Close</th>
         <th>Options</th>
+        <th>Results</th>
       </tr>
     </thead>
     <tbody>
@@ -18,9 +60,14 @@
         <td>{{ vote.open_date }}</td>
         <td>{{ vote.close_date }}</td>
         <td>{{ vote.options|length }}</td>
+        <td>
+          {% for option in vote.options %}
+          <div>{{ option.label }}: {{ vote_results.get(option.id, 0) }}</div>
+          {% endfor %}
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="4" class="text-secondary">No votes yet.</td></tr>
+      <tr><td colspan="5" class="text-secondary">No votes yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

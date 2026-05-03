@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h3 mb-3">Settings</h1>
+
+<form action="/settings" method="post" class="bg-white border rounded p-3">
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label" for="brand_name">Brand name</label>
+      <input class="form-control" id="brand_name" name="brand_name" value="{{ settings.get('brand_name', '') }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label" for="contact_email">Contact email</label>
+      <input class="form-control" id="contact_email" name="contact_email" type="email" value="{{ settings.get('contact_email', '') }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label" for="whatsapp_number">WhatsApp number</label>
+      <input class="form-control" id="whatsapp_number" name="whatsapp_number" value="{{ settings.get('whatsapp_number', '') }}">
+    </div>
+    <div class="col-12">
+      <label class="form-label" for="payment_instructions">Payment instructions</label>
+      <textarea class="form-control" id="payment_instructions" name="payment_instructions" rows="4">{{ settings.get('payment_instructions', '') }}</textarea>
+    </div>
+    <div class="col-12">
+      <hr>
+      <h2 class="h5 mb-3">Payment options</h2>
+      <div class="row g-3">
+        {% for provider, label in payment_providers.items() %}
+        {% set prefix = 'payment_' ~ provider ~ '_' %}
+        <div class="col-12">
+          <div class="border rounded p-3">
+            <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+              <h3 class="h6 mb-0">{{ label }}</h3>
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" id="{{ prefix }}enabled" name="{{ prefix }}enabled" type="checkbox" value="1" {% if settings.get(prefix ~ 'enabled') == '1' %}checked{% endif %}>
+                <label class="form-check-label" for="{{ prefix }}enabled">Enabled</label>
+              </div>
+            </div>
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label" for="{{ prefix }}display_name">Display name</label>
+                <input class="form-control" id="{{ prefix }}display_name" name="{{ prefix }}display_name" value="{{ settings.get(prefix ~ 'display_name', label) }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="{{ prefix }}handle">Handle, email, or phone</label>
+                <input class="form-control" id="{{ prefix }}handle" name="{{ prefix }}handle" value="{{ settings.get(prefix ~ 'handle', '') }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="{{ prefix }}payment_url">Payment URL</label>
+                <input class="form-control" id="{{ prefix }}payment_url" name="{{ prefix }}payment_url" value="{{ settings.get(prefix ~ 'payment_url', '') }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="{{ prefix }}api_base_url">API base URL</label>
+                <input class="form-control" id="{{ prefix }}api_base_url" name="{{ prefix }}api_base_url" value="{{ settings.get(prefix ~ 'api_base_url', '') }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="{{ prefix }}api_key">API key</label>
+                <input class="form-control" id="{{ prefix }}api_key" name="{{ prefix }}api_key" type="password" value="{{ settings.get(prefix ~ 'api_key', '') }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="{{ prefix }}webhook_secret">Webhook secret</label>
+                <input class="form-control" id="{{ prefix }}webhook_secret" name="{{ prefix }}webhook_secret" type="password" value="{{ settings.get(prefix ~ 'webhook_secret', '') }}">
+              </div>
+              <div class="col-12">
+                {% if settings.get(prefix ~ 'handle') or settings.get(prefix ~ 'payment_url') %}
+                <div class="d-flex align-items-center gap-3">
+                  <img src="/settings/payment-options/{{ provider }}/qr.svg" alt="{{ label }} QR code" width="132" height="132" class="border rounded bg-white p-2">
+                  <div class="text-secondary small">Scan this code to open the configured {{ label }} payment target.</div>
+                </div>
+                {% else %}
+                <div class="text-secondary small">Add a payment URL or handle to generate a scannable QR code.</div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary" type="submit">Save settings</button>
+    </div>
+  </div>
+</form>
+{% endblock %}

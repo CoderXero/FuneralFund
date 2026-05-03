@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h3 mb-3">Admin</h1>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <a class="text-decoration-none" href="/members">
+      <div class="bg-white border rounded p-3 h-100">
+        <div class="text-secondary small">Members</div>
+        <div class="fs-4 fw-semibold">{{ member_count }}</div>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-3">
+    <a class="text-decoration-none" href="/payments">
+      <div class="bg-white border rounded p-3 h-100">
+        <div class="text-secondary small">Pending payments</div>
+        <div class="fs-4 fw-semibold">{{ pending_payments }}</div>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-3">
+    <a class="text-decoration-none" href="/voting">
+      <div class="bg-white border rounded p-3 h-100">
+        <div class="text-secondary small">Open votes</div>
+        <div class="fs-4 fw-semibold">{{ open_votes }}</div>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-3">
+    <a class="text-decoration-none" href="/admin/messages">
+      <div class="bg-white border rounded p-3 h-100">
+        <div class="text-secondary small">Leadership messages</div>
+        <div class="fs-4 fw-semibold">{{ leadership_messages }}</div>
+      </div>
+    </a>
+  </div>
+</div>
+
+<div class="bg-white border rounded p-3">
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-outline-primary" href="/members">Manage members</a>
+    <a class="btn btn-outline-primary" href="/payments">Manage payments</a>
+    <a class="btn btn-outline-primary" href="/voting">Manage voting</a>
+    <a class="btn btn-outline-primary" href="/admin/messages">Manage messages</a>
+  </div>
+</div>
+{% endblock %}

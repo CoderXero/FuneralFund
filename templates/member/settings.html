@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="h3 mb-3">My Settings</h1>
+
+<form action="/my/settings" method="post" class="bg-white border rounded p-3">
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label" for="name">Name</label>
+      <input class="form-control" id="name" name="name" value="{{ user.name }}" required>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="dob">Date of birth</label>
+      <input class="form-control" id="dob" name="dob" type="date" value="{{ user.dob or '' }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="whatsapp_number">WhatsApp number</label>
+      <input class="form-control" id="whatsapp_number" name="whatsapp_number" value="{{ member_settings.get('whatsapp_number', '') }}">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label" for="preferred_payment_provider">Preferred payment option</label>
+      <select class="form-select" id="preferred_payment_provider" name="preferred_payment_provider">
+        <option value="">No preference</option>
+        {% for provider, label in payment_providers.items() %}
+        <option value="{{ provider }}" {% if member_settings.get('preferred_payment_provider') == provider %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label" for="cashapp_handle">Cash App handle</label>
+      <input class="form-control" id="cashapp_handle" name="cashapp_handle" value="{{ member_settings.get('cashapp_handle', '') }}">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label" for="venmo_handle">Venmo handle</label>
+      <input class="form-control" id="venmo_handle" name="venmo_handle" value="{{ member_settings.get('venmo_handle', '') }}">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label" for="zelle_handle">Zelle email or phone</label>
+      <input class="form-control" id="zelle_handle" name="zelle_handle" value="{{ member_settings.get('zelle_handle', '') }}">
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary" type="submit">Save settings</button>
+    </div>
+  </div>
+</form>
+{% endblock %}

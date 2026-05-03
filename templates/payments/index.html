@@ -1,6 +1,63 @@
 {% extends "base.html" %}
 {% block content %}
 <h1 class="h3 mb-3">Payments</h1>
+
+<form action="/fees" method="post" class="bg-white border rounded p-3 mb-4">
+  <div class="row g-3 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label" for="name">Fee name</label>
+      <input class="form-control" id="name" name="name" required>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="amount">Amount</label>
+      <input class="form-control" id="amount" name="amount" inputmode="decimal" required>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="type">Type</label>
+      <select class="form-select" id="type" name="type">
+        <option value="one_time">One-time</option>
+        <option value="recurring">Recurring</option>
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="recurring_interval">Interval</label>
+      <select class="form-select" id="recurring_interval" name="recurring_interval">
+        <option value="">None</option>
+        <option value="monthly">Monthly</option>
+        <option value="yearly">Yearly</option>
+      </select>
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary" type="submit">Create fee</button>
+    </div>
+  </div>
+</form>
+
+{% if fees %}
+<div class="table-responsive bg-white border rounded mb-4">
+  <table class="table table-sm mb-0">
+    <thead>
+      <tr>
+        <th>Fee</th>
+        <th>Type</th>
+        <th>Amount</th>
+        <th>Interval</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for fee in fees %}
+      <tr>
+        <td>{{ fee.name }}</td>
+        <td>{{ fee.type }}</td>
+        <td>{{ fee.amount }}</td>
+        <td>{{ fee.recurring_interval or "" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 <div class="table-responsive bg-white border rounded">
   <table class="table table-hover mb-0">
     <thead>
@@ -10,6 +67,7 @@
         <th>Method</th>
         <th>Amount</th>
         <th>Status</th>
+        <th class="text-end">Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -20,9 +78,21 @@
         <td>{{ payment.method }}</td>
         <td>{{ payment.amount }}</td>
         <td>{{ payment.status }}</td>
+        <td class="text-end">
+          {% if payment.status == "pending" %}
+          <div class="d-inline-flex gap-2">
+            <form action="/payments/{{ payment.id }}/verify" method="post">
+              <button class="btn btn-sm btn-outline-success" type="submit">Verify</button>
+            </form>
+            <form action="/payments/{{ payment.id }}/reject" method="post">
+              <button class="btn btn-sm btn-outline-danger" type="submit">Reject</button>
+            </form>
+          </div>
+          {% endif %}
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="5" class="text-secondary">No payments yet.</td></tr>
+      <tr><td colspan="6" class="text-secondary">No payments yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>
