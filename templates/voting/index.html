@@ -3,6 +3,7 @@
 <h1 class="h3 mb-3">Voting</h1>
 
 <form action="/voting" method="post" class="bg-white border rounded p-3 mb-4">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="row g-3">
     <div class="col-md-6">
       <label class="form-label" for="title">Title</label>

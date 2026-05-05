@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from flask import Flask
+from flask import Flask, request
 
 from .config import Config
 from .extensions import db, migrate, oauth
@@ -34,6 +34,20 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(web_bp)
     app.register_blueprint(api_bp, url_prefix="/api")
+
+    from .csrf import csrf_token, validate_csrf
+
+    @app.before_request
+    def protect_web_forms() -> None:
+        if not app.config["WEB_CSRF_ENABLED"]:
+            return
+        if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+            return
+        if request.path.startswith("/api/"):
+            return
+        validate_csrf()
+
+    app.jinja_env.globals["csrf_token"] = csrf_token
 
     @app.cli.command("init-db")
     def init_db() -> None:

@@ -9,7 +9,17 @@ from sqlalchemy.exc import IntegrityError
 from .auth import current_user, require_roles
 from .extensions import db
 from .models import FamilyMember, Fee, Notice, Payment, Setting, User, Vote, VoteCast, VoteOption
-from .services import age_on, approve_member, audit, verify_payment
+from .services import (
+    FAMILY_CATEGORIES,
+    PAYMENT_METHODS,
+    STATUSES,
+    age_on,
+    approve_member,
+    audit,
+    ensure_role_assignment_allowed,
+    validate_choice,
+    verify_payment,
+)
 
 api_bp = Blueprint("api", __name__)
 
@@ -47,14 +57,14 @@ def parse_decimal(value: object, field: str = "amount") -> Decimal:
     return amount
 
 
-def validate_choice(value: str, field: str, choices: set[str]) -> None:
-    if value not in choices:
-        raise ValueError(f"{field} must be one of: {', '.join(sorted(choices))}")
-
-
 @api_bp.errorhandler(ValueError)
 def value_error(exc: ValueError):
     return error(str(exc), 400)
+
+
+@api_bp.errorhandler(PermissionError)
+def permission_error(exc: PermissionError):
+    return error(str(exc), 403)
 
 
 @api_bp.errorhandler(IntegrityError)
@@ -75,21 +85,21 @@ def user_json(user: User) -> dict:
 
 
 @api_bp.get("/members")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def members_index():
     return jsonify([user_json(user) for user in User.query.order_by(User.created_at.desc()).all()])
 
 
 @api_bp.post("/members")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def members_create():
     data = payload()
     require_fields(data, "email")
     actor = current_user()
-    role = data.get("role", "member")
+    role = data.get("role", "community_user")
     status = data.get("status", "pending")
-    validate_choice(role, "role", {"admin", "leader", "member"})
-    validate_choice(status, "status", {"active", "pending", "late", "suspended"})
+    ensure_role_assignment_allowed(actor, role)
+    validate_choice(status, "status", STATUSES)
     user = User(
         email=data["email"],
         name=data.get("name", data["email"]),
@@ -105,21 +115,21 @@ def members_create():
 
 
 @api_bp.get("/members/<int:member_id>")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def members_show(member_id: int):
     return jsonify(user_json(db.get_or_404(User, member_id)))
 
 
 @api_bp.put("/members/<int:member_id>")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def members_update(member_id: int):
     data = payload()
     actor = current_user()
     user = db.get_or_404(User, member_id)
     if "role" in data:
-        validate_choice(data["role"], "role", {"admin", "leader", "member"})
+        ensure_role_assignment_allowed(actor, data["role"])
     if "status" in data:
-        validate_choice(data["status"], "status", {"active", "pending", "late", "suspended"})
+        validate_choice(data["status"], "status", STATUSES)
     for field in ["name", "role", "status"]:
         if field in data:
             setattr(user, field, data[field])
@@ -131,7 +141,7 @@ def members_update(member_id: int):
 
 
 @api_bp.post("/members/<int:member_id>/approve")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def members_approve(member_id: int):
     actor = current_user()
     user = approve_member(db.get_or_404(User, member_id), actor)
@@ -140,18 +150,18 @@ def members_approve(member_id: int):
 
 
 @api_bp.post("/members/<int:member_id>/promote")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def members_promote(member_id: int):
     actor = current_user()
     user = db.get_or_404(User, member_id)
-    user.role = "leader"
+    user.role = "community_admin"
     audit(actor, "member.promote", "user", user.id)
     db.session.commit()
     return jsonify(user_json(user))
 
 
 @api_bp.post("/members/<int:member_id>/suspend")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def members_suspend(member_id: int):
     actor = current_user()
     user = db.get_or_404(User, member_id)
@@ -162,7 +172,7 @@ def members_suspend(member_id: int):
 
 
 @api_bp.post("/members/<int:member_id>/family")
-@require_roles("admin", "leader", "member")
+@require_roles("admin", "community_admin", "community_user")
 def family_create(member_id: int):
     actor = current_user()
     if actor.id != member_id and not actor.is_leadership:
@@ -172,7 +182,7 @@ def family_create(member_id: int):
     validate_choice(
         data["category"],
         "category",
-        {"primary", "secondary", "dependant", "relative", "pending_member"},
+        FAMILY_CATEGORIES,
     )
     family = FamilyMember(
         user_id=member_id,
@@ -189,7 +199,7 @@ def family_create(member_id: int):
 
 
 @api_bp.put("/family/<int:family_id>")
-@require_roles("admin", "leader", "member")
+@require_roles("admin", "community_admin", "community_user")
 def family_update(family_id: int):
     actor = current_user()
     family = db.get_or_404(FamilyMember, family_id)
@@ -200,7 +210,7 @@ def family_update(family_id: int):
         validate_choice(
             data["category"],
             "category",
-            {"primary", "secondary", "dependant", "relative", "pending_member"},
+            FAMILY_CATEGORIES,
         )
     if "status" in data:
         validate_choice(data["status"], "status", {"active", "pending", "inactive"})
@@ -215,7 +225,7 @@ def family_update(family_id: int):
 
 
 @api_bp.delete("/family/<int:family_id>")
-@require_roles("admin", "leader", "member")
+@require_roles("admin", "community_admin", "community_user")
 def family_delete(family_id: int):
     actor = current_user()
     family = db.get_or_404(FamilyMember, family_id)
@@ -228,7 +238,7 @@ def family_delete(family_id: int):
 
 
 @api_bp.post("/fees/recurring")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def fees_recurring_create():
     data = payload()
     require_fields(data, "name", "amount")
@@ -239,32 +249,34 @@ def fees_recurring_create():
         recurring_interval=data.get("recurring_interval", "monthly"),
     )
     db.session.add(fee)
-    audit(current_user(), "fee.create", "fee", "pending", type="recurring")
+    db.session.flush()
+    audit(current_user(), "fee.create", "fee", fee.id, type="recurring")
     db.session.commit()
     return jsonify({"id": fee.id, "name": fee.name}), 201
 
 
 @api_bp.post("/fees/one-time")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def fees_one_time_create():
     data = payload()
     require_fields(data, "name", "amount")
     fee = Fee(name=data["name"], type="one_time", amount=parse_decimal(data["amount"]))
     db.session.add(fee)
-    audit(current_user(), "fee.create", "fee", "pending", type="one_time")
+    db.session.flush()
+    audit(current_user(), "fee.create", "fee", fee.id, type="one_time")
     db.session.commit()
     return jsonify({"id": fee.id, "name": fee.name}), 201
 
 
 @api_bp.get("/notices/<notice_number>")
-@require_roles("admin", "leader", "member")
+@require_roles("admin", "community_admin", "community_user")
 def notices_show(notice_number: str):
     notice = Notice.query.filter_by(notice_number=notice_number).first_or_404()
     return jsonify({"notice_number": notice.notice_number, "title": notice.title, "amount": str(notice.amount)})
 
 
 @api_bp.post("/payments/initiate")
-@require_roles("admin", "leader", "member")
+@require_roles("admin", "community_admin", "community_user")
 def payments_initiate():
     data = payload()
     require_fields(data, "amount")
@@ -277,6 +289,7 @@ def payments_initiate():
         return jsonify({"error": "cannot initiate payment for another member"}), 403
     if db.session.get(User, member_id) is None:
         return error("member not found", 404)
+    validate_choice(data.get("method", "manual"), "method", PAYMENT_METHODS)
     payment = Payment(
         member_id=member_id,
         fee_id=data.get("fee_id"),
@@ -292,7 +305,7 @@ def payments_initiate():
 
 
 @api_bp.post("/payments/proof")
-@require_roles("admin", "leader", "member")
+@require_roles("admin", "community_admin", "community_user")
 def payments_proof():
     data = payload()
     require_fields(data, "payment_id")
@@ -309,7 +322,7 @@ def payments_proof():
 
 
 @api_bp.post("/payments/verify")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def payments_verify():
     data = payload()
     require_fields(data, "payment_id", "status")
@@ -319,7 +332,7 @@ def payments_verify():
 
 
 @api_bp.post("/votes")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def votes_create():
     data = payload()
     require_fields(data, "title", "open_date", "close_date")
@@ -348,7 +361,7 @@ def votes_create():
 
 
 @api_bp.post("/votes/<int:vote_id>/cast")
-@require_roles("admin", "leader", "member")
+@require_roles("admin", "community_admin", "community_user")
 def votes_cast(vote_id: int):
     actor = current_user()
     data = payload()
@@ -373,7 +386,7 @@ def votes_cast(vote_id: int):
 
 
 @api_bp.get("/votes/<int:vote_id>/results")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def votes_results(vote_id: int):
     vote = db.get_or_404(Vote, vote_id)
     results = []
@@ -384,7 +397,7 @@ def votes_results(vote_id: int):
 
 
 @api_bp.get("/reports/monthly")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def reports_monthly():
     return jsonify({
         "members": User.query.count(),
@@ -395,26 +408,26 @@ def reports_monthly():
 
 
 @api_bp.get("/reports/yearly")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def reports_yearly():
     return reports_monthly()
 
 
 @api_bp.get("/reports/voter-roll")
-@require_roles("admin", "leader")
+@require_roles("admin", "community_admin")
 def reports_voter_roll():
     users = User.query.filter_by(status="active").all()
     return jsonify([user_json(user) for user in users if age_on(user.dob) is not None and age_on(user.dob) >= 21])
 
 
 @api_bp.get("/settings")
-@require_roles("admin", "leader")
+@require_roles("admin")
 def settings_get():
     return jsonify({setting.key: setting.value for setting in Setting.query.all()})
 
 
 @api_bp.put("/settings")
-@require_roles("admin", "leader")
+@require_roles("admin")
 def settings_put():
     actor = current_user()
     for key, value in payload().items():

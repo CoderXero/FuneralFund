@@ -78,7 +78,7 @@ def test_leader_can_create_member_from_ui(client, leader_headers, app):
         data={
             "email": "ui-member@example.test",
             "name": "UI Member",
-            "role": "member",
+            "role": "community_user",
             "status": "pending",
         },
         headers=leader_headers,
@@ -122,7 +122,7 @@ def test_leader_can_create_vote_from_ui(client, leader_headers, app):
         assert len(vote.options) == 2
 
 
-def test_leader_can_update_settings_from_ui(client, leader_headers, app):
+def test_admin_can_update_settings_from_ui(client, admin_headers, app):
     response = client.post(
         "/settings",
         data={
@@ -134,23 +134,14 @@ def test_leader_can_update_settings_from_ui(client, leader_headers, app):
             "payment_cashapp_display_name": "Cash App",
             "payment_cashapp_handle": "$communityfund",
             "payment_cashapp_payment_url": "https://cash.app/$communityfund",
-            "payment_cashapp_api_base_url": "https://api.cash.app",
-            "payment_cashapp_api_key": "cash-key",
-            "payment_cashapp_webhook_secret": "cash-secret",
             "payment_venmo_enabled": "1",
             "payment_venmo_display_name": "Venmo",
             "payment_venmo_handle": "communityfund",
-            "payment_venmo_api_base_url": "https://api.venmo.com",
-            "payment_venmo_api_key": "venmo-key",
-            "payment_venmo_webhook_secret": "venmo-secret",
             "payment_zelle_enabled": "1",
             "payment_zelle_display_name": "Zelle",
             "payment_zelle_handle": "payments@example.test",
-            "payment_zelle_api_base_url": "https://api.zellepay.com",
-            "payment_zelle_api_key": "zelle-key",
-            "payment_zelle_webhook_secret": "zelle-secret",
         },
-        headers=leader_headers,
+        headers=admin_headers,
     )
 
     assert response.status_code == 302
@@ -158,12 +149,25 @@ def test_leader_can_update_settings_from_ui(client, leader_headers, app):
         assert db_value("brand_name") == "Community Fund"
         assert db_value("payment_instructions") == "Send proof after payment."
         assert db_value("payment_cashapp_enabled") == "1"
-        assert db_value("payment_cashapp_api_key") == "cash-key"
         assert db_value("payment_venmo_handle") == "communityfund"
         assert db_value("payment_zelle_handle") == "payments@example.test"
 
 
-def test_settings_page_shows_payment_option_qr(client, leader_headers, app):
+def test_settings_page_does_not_render_payment_secrets(client, admin_headers):
+    response = client.get("/settings", headers=admin_headers)
+
+    assert response.status_code == 200
+    assert b"api_key" not in response.data
+    assert b"webhook_secret" not in response.data
+
+
+def test_leader_cannot_use_app_settings(client, leader_headers):
+    response = client.get("/settings", headers=leader_headers)
+
+    assert response.status_code == 403
+
+
+def test_settings_page_shows_payment_option_qr(client, admin_headers, app):
     client.post(
         "/settings",
         data={
@@ -171,16 +175,16 @@ def test_settings_page_shows_payment_option_qr(client, leader_headers, app):
             "payment_cashapp_display_name": "Cash App",
             "payment_cashapp_handle": "$communityfund",
         },
-        headers=leader_headers,
+        headers=admin_headers,
     )
 
-    response = client.get("/settings", headers=leader_headers)
+    response = client.get("/settings", headers=admin_headers)
 
     assert response.status_code == 200
     assert b"/settings/payment-options/cashapp/qr.svg" in response.data
 
 
-def test_payment_option_qr_returns_svg(client, leader_headers):
+def test_payment_option_qr_returns_svg(client, admin_headers, leader_headers):
     client.post(
         "/settings",
         data={
@@ -188,7 +192,7 @@ def test_payment_option_qr_returns_svg(client, leader_headers):
             "payment_venmo_display_name": "Venmo",
             "payment_venmo_handle": "communityfund",
         },
-        headers=leader_headers,
+        headers=admin_headers,
     )
 
     response = client.get("/settings/payment-options/venmo/qr.svg", headers=leader_headers)
@@ -258,7 +262,7 @@ def test_member_can_update_my_settings(client, member_headers, app):
         assert db_value(f"user_{member.id}_preferred_payment_provider") == "zelle"
 
 
-def test_member_can_start_payment_and_save_proof_from_ui(client, member_headers, leader_headers, app):
+def test_member_can_start_payment_and_save_proof_from_ui(client, member_headers, admin_headers, app):
     client.post(
         "/settings",
         data={
@@ -266,7 +270,7 @@ def test_member_can_start_payment_and_save_proof_from_ui(client, member_headers,
             "payment_cashapp_display_name": "Cash App",
             "payment_cashapp_handle": "$communityfund",
         },
-        headers=leader_headers,
+        headers=admin_headers,
     )
     with app.app_context():
         fee = Fee(name="Monthly Dues", type="recurring", amount="25.00", recurring_interval="monthly")
@@ -350,7 +354,12 @@ def test_leader_can_send_admin_broadcast_message(client, leader_headers, member_
 
     response = client.post(
         "/admin/messages",
-        data={"audience": "community_user", "subject": "Meeting", "body": "Monthly meeting tonight."},
+        data={
+            "delivery": "broadcast",
+            "audience": "community_user",
+            "subject": "Meeting",
+            "body": "Monthly meeting tonight.",
+        },
         headers=leader_headers,
     )
 
@@ -365,14 +374,12 @@ def test_leader_can_send_admin_broadcast_message(client, leader_headers, member_
 
 def test_leader_can_send_direct_message_to_member(client, leader_headers, member_headers, app):
     client.get("/dashboard", headers=member_headers)
-    with app.app_context():
-        member = User.query.filter_by(email="member@example.test").one()
-        member_id = member.id
 
     response = client.post(
         "/admin/messages",
         data={
-            "recipient_id": str(member_id),
+            "delivery": "direct",
+            "recipient_email": "member@example.test",
             "subject": "Direct note",
             "body": "Please update your profile.",
         },
@@ -381,9 +388,10 @@ def test_leader_can_send_direct_message_to_member(client, leader_headers, member
 
     assert response.status_code == 302
     with app.app_context():
+        member = User.query.filter_by(email="member@example.test").one()
         message = Message.query.filter_by(subject="Direct note").one()
         assert message.audience == "direct"
-        assert message.recipient_id == member_id
+        assert message.recipient_id == member.id
 
     member_inbox = client.get("/my/messages", headers=member_headers)
     assert b"Direct note" in member_inbox.data
@@ -392,14 +400,102 @@ def test_leader_can_send_direct_message_to_member(client, leader_headers, member
     assert b"Direct note" in leader_history.data
 
 
+def test_leader_can_archive_message_until_fiscal_year_end(client, leader_headers, member_headers, app):
+    client.get("/dashboard", headers=member_headers)
+    client.post(
+        "/admin/messages",
+        data={
+            "delivery": "broadcast",
+            "audience": "community_user",
+            "subject": "Archive me",
+            "body": "Temporary notice.",
+        },
+        headers=leader_headers,
+    )
+    with app.app_context():
+        message = Message.query.filter_by(subject="Archive me").one()
+        message_id = message.id
+
+    response = client.post(f"/admin/messages/{message_id}/archive", headers=leader_headers)
+
+    assert response.status_code == 302
+    with app.app_context():
+        message = db.session.get(Message, message_id)
+        assert message.archived_at is not None
+        assert str(message.retain_until) == f"{date.today().year}-12-31"
+
+    member_inbox = client.get("/my/messages", headers=member_headers)
+    assert b"Archive me" not in member_inbox.data
+
+    leader_history = client.get("/admin/messages", headers=leader_headers)
+    assert b"Archive me" in leader_history.data
+    assert f"Archived until {date.today().year}-12-31".encode() in leader_history.data
+
+
+def test_direct_message_requires_existing_member_email(client, leader_headers):
+    response = client.post(
+        "/admin/messages",
+        data={
+            "delivery": "direct",
+            "recipient_email": "missing@example.test",
+            "subject": "Missing",
+            "body": "No recipient.",
+        },
+        headers=leader_headers,
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"recipient_email must match an existing member" in response.data
+
+
 def test_member_cannot_use_admin_messaging(client, member_headers):
     response = client.post(
         "/admin/messages",
-        data={"audience": "community_user", "subject": "Bad broadcast", "body": "Nope"},
+        data={"delivery": "broadcast", "audience": "community_user", "subject": "Bad broadcast", "body": "Nope"},
         headers=member_headers,
     )
 
     assert response.status_code == 403
+
+
+def test_leader_cannot_create_admin_from_ui(client, leader_headers, app):
+    response = client.post(
+        "/members",
+        data={
+            "email": "ui-admin@example.test",
+            "name": "UI Admin",
+            "role": "admin",
+            "status": "pending",
+        },
+        headers=leader_headers,
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"only admins can assign the admin role" in response.data
+    with app.app_context():
+        assert User.query.filter_by(email="ui-admin@example.test").one_or_none() is None
+
+
+def test_ui_rejects_invalid_vote_dates(client, leader_headers, app):
+    response = client.post(
+        "/voting",
+        data={
+            "title": "Bad dates",
+            "open_date": "2026-01-02",
+            "close_date": "2026-01-01",
+            "option_1": "Yes",
+            "option_2": "No",
+        },
+        headers=leader_headers,
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"close_date must be on or after open_date" in response.data
+    with app.app_context():
+        assert Vote.query.filter_by(title="Bad dates").one_or_none() is None
 
 
 def test_member_message_form_only_targets_leadership(client, member_headers):

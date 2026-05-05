@@ -11,6 +11,7 @@ class TestConfig(Config):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     FUNERAL_FUND_ENV = "testing"
+    WEB_CSRF_ENABLED = False
 
 
 @pytest.fixture()
@@ -29,11 +30,20 @@ def client(app):
 
 
 @pytest.fixture()
+def admin_headers():
+    return {
+        "X-User-Email": "admin@example.test",
+        "X-User-Name": "Admin",
+        "X-User-Groups": "admin",
+    }
+
+
+@pytest.fixture()
 def leader_headers():
     return {
         "X-User-Email": "leader@example.test",
         "X-User-Name": "Leader",
-        "X-User-Groups": "community_leader",
+        "X-User-Groups": "Community_leader",
     }
 
 
@@ -42,5 +52,5 @@ def member_headers():
     return {
         "X-User-Email": "member@example.test",
         "X-User-Name": "Member",
-        "X-User-Groups": "community_user",
+        "X-User-Groups": "community_member",
     }

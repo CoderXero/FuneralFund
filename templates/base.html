@@ -24,8 +24,9 @@
           {% endif %}
         </div>
         {% if user %}
-        <div class="ms-auto me-3 text-secondary small">{{ user.name }} | {{ user.role|title }}</div>
+        <div class="ms-auto me-3 text-secondary small">{{ user.name }} | {{ user.role_label }}</div>
         <form action="/auth/logout" method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-outline-secondary btn-sm">Sign out</button>
         </form>
         {% endif %}

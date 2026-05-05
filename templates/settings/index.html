@@ -3,6 +3,7 @@
 <h1 class="h3 mb-3">Settings</h1>
 
 <form action="/settings" method="post" class="bg-white border rounded p-3">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="row g-3">
     <div class="col-md-6">
       <label class="form-label" for="brand_name">Brand name</label>
@@ -47,18 +48,6 @@
               <div class="col-md-4">
                 <label class="form-label" for="{{ prefix }}payment_url">Payment URL</label>
                 <input class="form-control" id="{{ prefix }}payment_url" name="{{ prefix }}payment_url" value="{{ settings.get(prefix ~ 'payment_url', '') }}">
-              </div>
-              <div class="col-md-4">
-                <label class="form-label" for="{{ prefix }}api_base_url">API base URL</label>
-                <input class="form-control" id="{{ prefix }}api_base_url" name="{{ prefix }}api_base_url" value="{{ settings.get(prefix ~ 'api_base_url', '') }}">
-              </div>
-              <div class="col-md-4">
-                <label class="form-label" for="{{ prefix }}api_key">API key</label>
-                <input class="form-control" id="{{ prefix }}api_key" name="{{ prefix }}api_key" type="password" value="{{ settings.get(prefix ~ 'api_key', '') }}">
-              </div>
-              <div class="col-md-4">
-                <label class="form-label" for="{{ prefix }}webhook_secret">Webhook secret</label>
-                <input class="form-control" id="{{ prefix }}webhook_secret" name="{{ prefix }}webhook_secret" type="password" value="{{ settings.get(prefix ~ 'webhook_secret', '') }}">
               </div>
               <div class="col-12">
                 {% if settings.get(prefix ~ 'handle') or settings.get(prefix ~ 'payment_url') %}

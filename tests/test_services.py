@@ -17,7 +17,7 @@ def test_membership_status_thresholds():
 
 def test_age_out_dependants_converts_dependant_to_pending_member(app):
     with app.app_context():
-        user = User(email="parent@example.test", name="Parent", role="member", status="active")
+        user = User(email="parent@example.test", name="Parent", role="community_user", status="active")
         db.session.add(user)
         db.session.flush()
         dependant = FamilyMember(

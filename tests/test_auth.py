@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from funeral_fund import create_app
 from funeral_fund.config import Config
+from funeral_fund.csrf import CSRF_SESSION_KEY
 from funeral_fund.extensions import db, oauth
 from funeral_fund.models import User
 
@@ -59,7 +60,7 @@ def test_oauth_callback_creates_session(monkeypatch):
                     "sub": "idp-123",
                     "email": "leader@example.test",
                     "name": "Leader",
-                    "groups": ["community_leader"],
+                    "groups": ["Community_leader"],
                 }
             }
 
@@ -75,7 +76,15 @@ def test_oauth_callback_creates_session(monkeypatch):
         user = db.session.get(User, user_id)
         assert user is not None
         assert user.email == "leader@example.test"
-        assert user.role == "leader"
+        assert user.role == "community_admin"
+
+
+def test_group_claims_map_to_app_roles():
+    from funeral_fund.auth import role_from_groups
+
+    assert role_from_groups(["admin"]) == "admin"
+    assert role_from_groups(["Community_leader"]) == "community_admin"
+    assert role_from_groups(["community_member"]) == "community_user"
 
 
 def test_oauth_login_requires_client_secret():
@@ -103,11 +112,42 @@ def test_logout_clears_session():
     with app.test_client() as client:
         with client.session_transaction() as session:
             session["user_id"] = 123
+            session[CSRF_SESSION_KEY] = "known-token"
 
-        response = client.post("/auth/logout")
+        response = client.post("/auth/logout", data={"csrf_token": "known-token"})
 
         with client.session_transaction() as session:
             assert "user_id" not in session
 
     assert response.status_code == 302
     assert response.headers["Location"] == "/"
+
+
+def test_web_post_requires_csrf_token():
+    app = create_app(ProductionConfig)
+
+    with app.test_client() as client:
+        with client.session_transaction() as session:
+            session["user_id"] = 123
+            session[CSRF_SESSION_KEY] = "known-token"
+
+        response = client.post("/auth/logout")
+
+    assert response.status_code == 400
+    assert b"CSRF" in response.data
+
+
+def test_web_post_accepts_valid_csrf_token():
+    app = create_app(ProductionConfig)
+
+    with app.test_client() as client:
+        with client.session_transaction() as session:
+            session["user_id"] = 123
+            session[CSRF_SESSION_KEY] = "known-token"
+
+        response = client.post("/auth/logout", data={"csrf_token": "known-token"})
+
+        with client.session_transaction() as session:
+            assert "user_id" not in session
+
+    assert response.status_code == 302

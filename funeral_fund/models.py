@@ -9,6 +9,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship as orm_relationsh
 from .extensions import db
 
 
+ROLE_LABELS = {
+    "admin": "Admin",
+    "community_admin": "Leader",
+    "community_user": "Member",
+}
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -20,7 +27,7 @@ class User(db.Model):
     idp_sub: Mapped[str | None] = mapped_column(unique=True, nullable=True)
     email: Mapped[str] = mapped_column(unique=True, index=True)
     name: Mapped[str]
-    role: Mapped[str] = mapped_column(default="member")
+    role: Mapped[str] = mapped_column(default="community_user")
     status: Mapped[str] = mapped_column(default="pending")
     dob: Mapped[date | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
@@ -35,11 +42,15 @@ class User(db.Model):
 
     @property
     def is_leadership(self) -> bool:
-        return self.role in {"leader", "admin"}
+        return self.role in {"community_admin", "admin"}
 
     @property
     def is_admin(self) -> bool:
         return self.role == "admin"
+
+    @property
+    def role_label(self) -> str:
+        return ROLE_LABELS.get(self.role, self.role.replace("_", " ").title())
 
 
 class FamilyMember(db.Model):
@@ -153,6 +164,8 @@ class Message(db.Model):
     body: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     read_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    retain_until: Mapped[date | None] = mapped_column(nullable=True)
 
     sender: Mapped[User | None] = orm_relationship(foreign_keys=[sender_id])
     recipient: Mapped[User | None] = orm_relationship(foreign_keys=[recipient_id])

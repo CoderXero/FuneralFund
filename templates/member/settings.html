@@ -3,6 +3,7 @@
 <h1 class="h3 mb-3">My Settings</h1>
 
 <form action="/my/settings" method="post" class="bg-white border rounded p-3">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="row g-3">
     <div class="col-md-6">
       <label class="form-label" for="name">Name</label>

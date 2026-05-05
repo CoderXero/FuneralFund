@@ -3,6 +3,7 @@
 <h1 class="h3 mb-3">Payments</h1>
 
 <form action="/fees" method="post" class="bg-white border rounded p-3 mb-4">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="row g-3 align-items-end">
     <div class="col-md-4">
       <label class="form-label" for="name">Fee name</label>
@@ -82,9 +83,11 @@
           {% if payment.status == "pending" %}
           <div class="d-inline-flex gap-2">
             <form action="/payments/{{ payment.id }}/verify" method="post">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-success" type="submit">Verify</button>
             </form>
             <form action="/payments/{{ payment.id }}/reject" method="post">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-danger" type="submit">Reject</button>
             </form>
           </div>

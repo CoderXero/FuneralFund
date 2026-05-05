@@ -9,6 +9,15 @@ from .extensions import db
 from .models import AuditLog, FamilyMember, Payment, User, utcnow
 
 
+ROLES = {"admin", "community_admin", "community_user"}
+STATUSES = {"active", "pending", "late", "suspended"}
+FAMILY_CATEGORIES = {"primary", "secondary", "dependant", "relative", "pending_member"}
+FEE_TYPES = {"one_time", "recurring"}
+RECURRING_INTERVALS = {"", "monthly", "yearly"}
+PAYMENT_METHODS = {"cashapp", "venmo", "zelle", "manual"}
+MESSAGE_AUDIENCES = {"all", "community_user", "community_admin", "leadership"}
+
+
 def age_on(dob: date | None, today: date | None = None) -> int | None:
     if dob is None:
         return None
@@ -22,6 +31,17 @@ def membership_status(days_overdue: int) -> str:
     if days_overdue <= 60:
         return "late"
     return "suspended"
+
+
+def validate_choice(value: str, field: str, choices: set[str]) -> None:
+    if value not in choices:
+        raise ValueError(f"{field} must be one of: {', '.join(sorted(choices))}")
+
+
+def ensure_role_assignment_allowed(actor: User, role: str) -> None:
+    validate_choice(role, "role", ROLES)
+    if role == "admin" and not actor.is_admin:
+        raise PermissionError("only admins can assign the admin role")
 
 
 def audit(actor: User | None, action: str, target_type: str, target_id: object, **metadata) -> None:

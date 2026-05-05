@@ -24,6 +24,7 @@
       {% endif %}
       {% if not casts.get(vote.id) and eligible %}
       <form action="/my/voting/{{ vote.id }}/cast" method="post" class="mt-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {% for option in vote.options %}
         <div class="form-check">
           <input class="form-check-input" id="option_{{ option.id }}" name="option_id" type="radio" value="{{ option.id }}" required>

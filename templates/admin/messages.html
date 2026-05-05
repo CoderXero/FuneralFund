@@ -3,25 +3,28 @@
 <h1 class="h3 mb-3">Admin Messages</h1>
 
 <form action="/admin/messages" method="post" class="bg-white border rounded p-3 mb-4">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="row g-3">
+    <div class="col-md-3">
+      <label class="form-label" for="delivery">Delivery</label>
+      <select class="form-select" id="delivery" name="delivery">
+        <option value="broadcast">Broadcast</option>
+        <option value="direct">Individual member</option>
+      </select>
+    </div>
     <div class="col-md-3">
       <label class="form-label" for="audience">Audience</label>
       <select class="form-select" id="audience" name="audience">
         <option value="all">All members</option>
         <option value="community_user">Community users</option>
-        <option value="community_leader">Leadership</option>
+        <option value="community_admin">Leadership</option>
       </select>
     </div>
     <div class="col-md-3">
-      <label class="form-label" for="recipient_id">Direct recipient</label>
-      <select class="form-select" id="recipient_id" name="recipient_id">
-        <option value="">Broadcast</option>
-        {% for member in members %}
-        <option value="{{ member.id }}">{{ member.name }} - {{ member.email }}</option>
-        {% endfor %}
-      </select>
+      <label class="form-label" for="recipient_email">Member email</label>
+      <input class="form-control" id="recipient_email" name="recipient_email" type="email">
     </div>
-    <div class="col-md-6">
+    <div class="col-md-3">
       <label class="form-label" for="subject">Subject</label>
       <input class="form-control" id="subject" name="subject" required>
     </div>
@@ -46,7 +49,14 @@
     <div class="text-secondary small">
       {% if message.sender %}From {{ message.sender.name }}{% else %}System{% endif %}
       {% if message.recipient %} · To {{ message.recipient.name }}{% else %} · {{ message.audience }}{% endif %}
+      {% if message.archived_at %} · Archived until {{ message.retain_until }}{% endif %}
     </div>
+    {% if not message.archived_at %}
+    <form action="/admin/messages/{{ message.id }}/archive" method="post" class="mt-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-sm btn-outline-secondary" type="submit">Archive</button>
+    </form>
+    {% endif %}
   </div>
   {% else %}
   <div class="bg-white border rounded p-3 text-secondary">No messages yet.</div>

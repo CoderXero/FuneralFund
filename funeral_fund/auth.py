@@ -15,16 +15,19 @@ auth_bp = Blueprint("auth", __name__)
 
 GROUP_ROLE_MAP = {
     "admin": "admin",
-    "community_leader": "leader",
-    "community_user": "member",
+    "community_leader": "community_admin",
+    "community_admin": "community_admin",
+    "community_member": "community_user",
+    "community_user": "community_user",
 }
 
 
 def role_from_groups(groups: list[str] | tuple[str, ...]) -> str:
+    normalized_groups = {group.lower() for group in groups}
     for group, role in GROUP_ROLE_MAP.items():
-        if group in groups:
+        if group in normalized_groups:
             return role
-    return "member"
+    return "community_user"
 
 
 def header_auth_allowed() -> bool:
@@ -66,7 +69,7 @@ def upsert_user(
             email=email,
             name=name or email,
             role=role,
-            status="active" if "admin" in groups else "pending",
+            status="active" if role == "admin" else "pending",
             idp_sub=idp_sub,
         )
         db.session.add(user)

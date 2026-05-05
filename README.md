@@ -43,14 +43,16 @@ In `development` and `testing`, request headers are also supported as an explici
 ```text
 X-User-Email: leader@example.test
 X-User-Name: Leader
-X-User-Groups: community_leader
+X-User-Groups: Community_leader
 ```
 
 Supported groups:
 
 * `admin`
-* `community_leader`
-* `community_user`
+* `Community_leader`
+* `community_member`
+
+Group matching is case-insensitive. In the app these display as `Admin`, `Leader`, and `Member`.
 
 When no IDP session or explicit development headers are present, protected routes return `401`.
 Header authentication is ignored outside development and testing.
@@ -58,6 +60,16 @@ Header authentication is ignored outside development and testing.
 ## Environment Variables
 
 Local defaults live in `.env`. Use `.env.example` as the template for new environments and do not commit real secrets.
+
+Payment provider API keys and webhook secrets are read from environment variables. For local development, put them in `.env`; for Azure App Service, configure them as App Service application settings. Do not store provider secrets in the web settings screen.
+
+Message archive retention uses `FISCAL_YEAR_END_MONTH` and `FISCAL_YEAR_END_DAY`. Archived messages remain in the database and are retained through the configured fiscal year end.
+
+## Message Management
+
+Leaders can manage messages from `/admin/messages`. They can broadcast to all members, community members, or leadership, and they can send direct messages to an individual member by email address. Direct email matching is case-insensitive.
+
+Archived messages are hidden from normal member inboxes but remain available in the leadership message management history until the configured fiscal year end.
 
 ## Tests
 
@@ -95,6 +107,8 @@ If a route fails with `sqlite3.OperationalError: no such table`, stop the server
 
 Sign in through `/auth/login` with IDP credentials. The app no longer creates a hard-coded local admin user.
 
+Next session focus: test the leadership message workflows end to end, including broadcast delivery, direct delivery by email, archive visibility, and fiscal-year retention dates.
+
 ## Current Scope
 
 Implemented:
@@ -106,7 +120,8 @@ Implemented:
 * Alembic/Flask-Migrate baseline
 * Member, family, fee, payment, voting, report, and settings APIs
 * Member self-service pages for profile/family, payments, voting, settings, and messages
-* Leadership Admin area for members, payments, voting, and messages
+* Leadership Admin area for members, payments, voting, and message management
+* Leadership broadcast, direct member messaging by email, and message archive workflow
 * Leadership payment settings for Cash App, Venmo, and Zelle with QR codes
 * Manual payment proof workflow
 * Basic Jinja2 dashboard pages

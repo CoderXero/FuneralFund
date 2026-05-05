@@ -32,6 +32,51 @@ def test_member_cannot_create_another_member(client, member_headers):
     assert response.status_code == 403
 
 
+def test_leader_cannot_create_admin_member(client, leader_headers):
+    response = client.post(
+        "/api/members",
+        json={"email": "admin@example.test", "name": "Admin", "role": "admin"},
+        headers=leader_headers,
+    )
+
+    assert response.status_code == 403
+    assert "only admins" in response.get_json()["error"]
+
+
+def test_leader_cannot_update_member_to_admin(client, leader_headers, app):
+    client.get("/", headers=leader_headers)
+    with app.app_context():
+        member = User(email="plain@example.test", name="Plain", role="community_user", status="active")
+        db.session.add(member)
+        db.session.commit()
+        member_id = member.id
+
+    response = client.put(
+        f"/api/members/{member_id}",
+        json={"role": "admin"},
+        headers=leader_headers,
+    )
+
+    assert response.status_code == 403
+
+
+def test_admin_can_create_admin_member(client, admin_headers):
+    response = client.post(
+        "/api/members",
+        json={"email": "new-admin@example.test", "name": "New Admin", "role": "admin"},
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 201
+    assert response.get_json()["role"] == "admin"
+
+
+def test_leader_cannot_use_settings_api(client, leader_headers):
+    response = client.get("/api/settings", headers=leader_headers)
+
+    assert response.status_code == 403
+
+
 def test_payment_manual_proof_and_verification(client, leader_headers, member_headers, app):
     client.get("/", headers=member_headers)
     with app.app_context():
