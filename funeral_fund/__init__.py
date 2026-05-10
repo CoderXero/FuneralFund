@@ -35,6 +35,10 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     app.register_blueprint(web_bp)
     app.register_blueprint(api_bp, url_prefix="/api")
 
+    @app.get("/readyz")
+    def readyz():
+        return {"status": "ok"}
+
     from .csrf import csrf_token, validate_csrf
 
     @app.before_request
