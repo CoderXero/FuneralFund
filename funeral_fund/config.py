@@ -15,15 +15,15 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     FUNERAL_FUND_ENV = os.getenv("FUNERAL_FUND_ENV", "development")
     PERMANENT_SESSION_LIFETIME = timedelta(minutes=int(os.getenv("SESSION_TIMEOUT_MINUTES", "60")))
-    CLIENT_ID = os.getenv("CLIENT_ID", "pamodzi_cc")
-    CLIENT_SECRET = os.getenv("CLIENT_SECRET", "")
-    REDIRECT_URI = os.getenv("REDIRECT_URI", "https://iam.zambeziblue.com/callback")
+    CLIENT_ID = os.getenv("CLIENT_ID") or os.getenv("OIDC_CLIENT_ID", "pamodzi_cc")
+    CLIENT_SECRET = os.getenv("CLIENT_SECRET") or os.getenv("OIDC_CLIENT_SECRET", "")
+    REDIRECT_URI = os.getenv("REDIRECT_URI") or os.getenv("OIDC_REDIRECT_URI", "https://iam.zambeziblue.com/callback")
     LOCAL_REDIRECT_URI = os.getenv("LOCAL_REDIRECT_URI", "http://localhost:8003/auth/callback")
     OIDC_SCOPE = os.getenv("OIDC_SCOPE", "openid email profile groups")
     OIDC_CODE_CHALLENGE_METHOD = os.getenv("OIDC_CODE_CHALLENGE_METHOD", "S256")
     OIDC_OPENID_CONFIG_URL = os.getenv(
         "OIDC_OPENID_CONFIG_URL",
-        "https://iam.zambeziblue.com/.well-known/openid-configuration",
+        f"{os.getenv('OIDC_ISSUER', 'https://iam.zambeziblue.com').rstrip('/')}/.well-known/openid-configuration",
     )
     JWKS_URL = os.getenv("JWKS_URL", "https://iam.zambeziblue.com/.well-known/jwks.json")
     SIGNUP_URL = os.getenv("SIGNUP_URL", "https://iam.zambeziblue.com/signup")
