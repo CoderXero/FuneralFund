@@ -65,6 +65,74 @@ Payment provider API keys and webhook secrets are read from environment variable
 
 Message archive retention uses `FISCAL_YEAR_END_MONTH` and `FISCAL_YEAR_END_DAY`. Archived messages remain in the database and are retained through the configured fiscal year end.
 
+## Azure Deployment
+
+Current production deployment:
+
+* Resource group: `iyam-b2c-prod-rg`
+* App Service plan: `iyam-b2c-prod-plan`
+* App Service: `ubuntu-20260510`
+* Default hostname: `https://ubuntu-20260510.azurewebsites.net`
+* PostgreSQL Flexible Server: `ubuntu-20260510-pg`
+* PostgreSQL database: `funeralfund`
+* Health check: `GET /readyz`
+
+The app runs on Azure App Service for Linux with Python 3.12. The production database is Azure Database for PostgreSQL Flexible Server. The App Service setting `DATABASE_URL` must use the SQLAlchemy psycopg dialect:
+
+```text
+postgresql+psycopg://<user>:<password>@<server>.postgres.database.azure.com:5432/<database>?sslmode=require
+```
+
+Production App Service settings must include:
+
+```text
+DATABASE_URL
+FUNERAL_FUND_ENV=production
+SECRET_KEY
+OIDC_CLIENT_ID or CLIENT_ID
+OIDC_CLIENT_SECRET or CLIENT_SECRET
+OIDC_OPENID_CONFIG_URL or OIDC_ISSUER
+OIDC_REDIRECT_URI or REDIRECT_URI
+OIDC_SCOPE
+OIDC_CODE_CHALLENGE_METHOD
+SCM_DO_BUILD_DURING_DEPLOYMENT=false
+WEBSITE_RUN_FROM_PACKAGE=1
+WEBSITES_CONTAINER_START_TIME_LIMIT=1800
+```
+
+The startup command used for the current App Service decodes a base64 startup script from `PAMODZI_STARTUP_B64`. The script unpacks the run-from-package zip into `/home/site/funeralfund-app`, creates a persistent virtualenv at `/home/site/funeralfund-venv`, installs `requirements.txt`, runs:
+
+```bash
+flask --app funeral_fund:create_app db upgrade
+```
+
+and starts Gunicorn:
+
+```bash
+gunicorn --bind=0.0.0.0:${PORT:-8000} --workers=2 --timeout=120 'funeral_fund:create_app()'
+```
+
+Manual deployment from this repo:
+
+```bash
+source .venv/bin/activate
+.venv/bin/pytest
+git archive --format zip HEAD -o /tmp/funeralfund.zip
+az webapp deployment source config-zip \
+  -g iyam-b2c-prod-rg \
+  -n ubuntu-20260510 \
+  --src /tmp/funeralfund.zip \
+  --timeout 900
+curl -fsS https://ubuntu-20260510.azurewebsites.net/readyz
+```
+
+Custom domain status:
+
+* `ubuntu.zambeziblue.com` is bound to the App Service.
+* DNS must point `ubuntu.zambeziblue.com` to `ubuntu-20260510.azurewebsites.net` before a managed TLS certificate can be issued and bound.
+
+Do not delete `iyam-b2c-prod-plan` during redeployments unless all other apps on that shared plan have been moved or removed.
+
 ## Message Management
 
 Leaders can manage messages from `/admin/messages`. They can broadcast to all members, community members, or leadership, and they can send direct messages to an individual member by email address. Direct email matching is case-insensitive.
@@ -133,3 +201,4 @@ Implemented:
 * Core lifecycle, migration, integration-boundary, and compliance tests
 
 Deferred production integrations are documented in [funeral_fund-spec.md](funeral_fund-spec.md).
+Version 2 rebuild and operations requirements are documented in [funeral_fund-v2-spec.md](funeral_fund-v2-spec.md).
