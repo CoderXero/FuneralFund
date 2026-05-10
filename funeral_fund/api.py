@@ -3,11 +3,13 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from .auth import current_user, require_roles
 from .extensions import db
+from .compliance import anonymize_user, export_user_data_json, purge_old_audit_logs
+from .integrations import BlobStorageClient, IntegrationNotConfigured, PaymentProviderClient, ReportExporter
 from .models import FamilyMember, Fee, Notice, Payment, Setting, User, Vote, VoteCast, VoteOption
 from .services import (
     FAMILY_CATEGORIES,
@@ -17,6 +19,8 @@ from .services import (
     approve_member,
     audit,
     ensure_role_assignment_allowed,
+    normalize_email,
+    promote_member,
     validate_choice,
     verify_payment,
 )
@@ -73,6 +77,11 @@ def integrity_error(exc: IntegrityError):
     return error("request conflicts with existing data", 409)
 
 
+@api_bp.errorhandler(IntegrationNotConfigured)
+def integration_not_configured(exc: IntegrationNotConfigured):
+    return error(str(exc), 503)
+
+
 def user_json(user: User) -> dict:
     return {
         "id": user.id,
@@ -101,7 +110,7 @@ def members_create():
     ensure_role_assignment_allowed(actor, role)
     validate_choice(status, "status", STATUSES)
     user = User(
-        email=data["email"],
+        email=normalize_email(data["email"]),
         name=data.get("name", data["email"]),
         role=role,
         status=status,
@@ -154,8 +163,7 @@ def members_approve(member_id: int):
 def members_promote(member_id: int):
     actor = current_user()
     user = db.get_or_404(User, member_id)
-    user.role = "community_admin"
-    audit(actor, "member.promote", "user", user.id)
+    promote_member(user, actor)
     db.session.commit()
     return jsonify(user_json(user))
 
@@ -189,6 +197,7 @@ def family_create(member_id: int):
         name=data["name"],
         category=data["category"],
         relationship=data.get("relationship"),
+        email=normalize_email(data["email"]) if data.get("email") else None,
         dob=parse_date(data.get("dob"), "dob"),
     )
     db.session.add(family)
@@ -217,6 +226,8 @@ def family_update(family_id: int):
     for field in ["name", "category", "relationship", "status"]:
         if field in data:
             setattr(family, field, data[field])
+    if "email" in data:
+        family.email = normalize_email(data["email"]) if data["email"] else None
     if "dob" in data:
         family.dob = parse_date(data["dob"], "dob")
     audit(actor, "family.update", "family_member", family.id)
@@ -407,6 +418,16 @@ def reports_monthly():
     })
 
 
+@api_bp.get("/reports/monthly.csv")
+@require_roles("admin", "community_admin")
+def reports_monthly_csv():
+    return Response(
+        ReportExporter().monthly_payments_csv(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=monthly-payments.csv"},
+    )
+
+
 @api_bp.get("/reports/yearly")
 @require_roles("admin", "community_admin")
 def reports_yearly():
@@ -437,3 +458,46 @@ def settings_put():
         audit(actor, "settings.update", "setting", key)
     db.session.commit()
     return settings_get()
+
+
+@api_bp.post("/payments/<provider>/webhook")
+def payments_provider_webhook(provider: str):
+    validate_choice(provider, "provider", PAYMENT_METHODS - {"manual"})
+    PaymentProviderClient(provider).verify_webhook(request.headers.get("X-Payment-Signature"))
+    return jsonify({"status": "accepted"})
+
+
+@api_bp.post("/uploads/payment-proof-url")
+@require_roles("admin", "community_admin", "community_user")
+def payment_proof_upload_url():
+    data = payload()
+    require_fields(data, "blob_name")
+    return jsonify({"upload_url": BlobStorageClient().signed_upload_url(data["blob_name"])})
+
+
+@api_bp.get("/compliance/users/<int:member_id>/export")
+@require_roles("admin")
+def compliance_user_export(member_id: int):
+    return Response(export_user_data_json(db.get_or_404(User, member_id)), mimetype="application/json")
+
+
+@api_bp.post("/compliance/users/<int:member_id>/anonymize")
+@require_roles("admin")
+def compliance_user_anonymize(member_id: int):
+    actor = current_user()
+    user = db.get_or_404(User, member_id)
+    if user.id == actor.id:
+        return error("admins cannot anonymize their own active account", 400)
+    anonymize_user(user, actor)
+    db.session.commit()
+    return jsonify(user_json(user))
+
+
+@api_bp.post("/compliance/audit/purge")
+@require_roles("admin")
+def compliance_audit_purge():
+    actor = current_user()
+    days = int(payload().get("retention_days", current_app.config["AUDIT_RETENTION_DAYS"]))
+    count = purge_old_audit_logs(days, actor)
+    db.session.commit()
+    return jsonify({"purged": count})

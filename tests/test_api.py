@@ -71,10 +71,56 @@ def test_admin_can_create_admin_member(client, admin_headers):
     assert response.get_json()["role"] == "admin"
 
 
+def test_member_create_normalizes_email(client, leader_headers, app):
+    response = client.post(
+        "/api/members",
+        json={"email": " Mixed@Example.Test ", "name": "Mixed"},
+        headers=leader_headers,
+    )
+
+    assert response.status_code == 201
+    assert response.get_json()["email"] == "mixed@example.test"
+    with app.app_context():
+        assert User.query.filter_by(email="mixed@example.test").one()
+
+
+def test_leader_cannot_promote_admin_member(client, admin_headers, leader_headers, app):
+    response = client.post(
+        "/api/members",
+        json={"email": "protected@example.test", "name": "Protected", "role": "admin"},
+        headers=admin_headers,
+    )
+    admin_id = response.get_json()["id"]
+
+    response = client.post(f"/api/members/{admin_id}/promote", headers=leader_headers)
+
+    assert response.status_code == 403
+    with app.app_context():
+        assert db.session.get(User, admin_id).role == "admin"
+
+
 def test_leader_cannot_use_settings_api(client, leader_headers):
     response = client.get("/api/settings", headers=leader_headers)
 
     assert response.status_code == 403
+
+
+def test_unconfigured_payment_webhook_returns_setup_error(client):
+    response = client.post("/api/payments/venmo/webhook")
+
+    assert response.status_code == 503
+    assert "webhook secret" in response.get_json()["error"]
+
+
+def test_unconfigured_payment_proof_upload_returns_setup_error(client, member_headers):
+    response = client.post(
+        "/api/uploads/payment-proof-url",
+        json={"blob_name": "proofs/example.png"},
+        headers=member_headers,
+    )
+
+    assert response.status_code == 503
+    assert "Blob Storage" in response.get_json()["error"]
 
 
 def test_payment_manual_proof_and_verification(client, leader_headers, member_headers, app):

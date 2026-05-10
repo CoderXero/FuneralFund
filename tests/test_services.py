@@ -24,6 +24,7 @@ def test_age_out_dependants_converts_dependant_to_pending_member(app):
             user_id=user.id,
             name="Adult Child",
             category="dependant",
+            email="Adult.Child@Example.Test",
             dob=date(2000, 1, 1),
         )
         db.session.add(dependant)
@@ -35,3 +36,6 @@ def test_age_out_dependants_converts_dependant_to_pending_member(app):
         assert [member.id for member in converted] == [dependant.id]
         assert dependant.category == "pending_member"
         assert dependant.status == "pending"
+        converted_user = db.session.get(User, dependant.converted_user_id)
+        assert converted_user.email == "adult.child@example.test"
+        assert converted_user.status == "pending"

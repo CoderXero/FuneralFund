@@ -47,6 +47,42 @@
   </div>
 </form>
 
+<form action="/my/payments" method="get" class="bg-white border rounded p-3 mb-4">
+  <div class="row g-3 align-items-end">
+    <div class="col-md-3">
+      <label class="form-label" for="history_status">Status</label>
+      <select class="form-select" id="history_status" name="status">
+        <option value="">Any status</option>
+        {% for status in payment_statuses %}
+        <option value="{{ status }}" {% if payment_filters.status == status %}selected{% endif %}>{{ status }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="history_fee_id">Fee name</label>
+      <select class="form-select" id="history_fee_id" name="fee_id">
+        <option value="">Any fee</option>
+        {% for fee_option in fee_options %}
+        <option value="{{ fee_option.id }}" {% if payment_filters.fee_id == fee_option.id|string %}selected{% endif %}>{{ fee_option.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="history_date_range">Date</label>
+      <select class="form-select" id="history_date_range" name="date_range">
+        <option value="all" {% if payment_filters.date_range == "all" %}selected{% endif %}>All time</option>
+        <option value="week" {% if payment_filters.date_range == "week" %}selected{% endif %}>Week</option>
+        <option value="month" {% if payment_filters.date_range == "month" %}selected{% endif %}>Month</option>
+        <option value="year" {% if payment_filters.date_range == "year" %}selected{% endif %}>Year</option>
+      </select>
+    </div>
+    <div class="col-md-3">
+      <button class="btn btn-outline-primary" type="submit">Retrieve history</button>
+      <a class="btn btn-outline-secondary" href="/my/payments">Clear</a>
+    </div>
+  </div>
+</form>
+
 <div class="table-responsive bg-white border rounded">
   <table class="table table-hover mb-0">
     <thead>
@@ -66,20 +102,28 @@
         <td>{{ payment.amount }}</td>
         <td>{{ payment.status }}</td>
         <td>
-          <form action="/my/payments/{{ payment.id }}/proof" method="post" class="row g-2">
+          <form action="/my/payments/{{ payment.id }}/proof" method="post" enctype="multipart/form-data" class="row g-2">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="col-md-4">
+            <div class="col-md-3">
               <input class="form-control form-control-sm" name="transaction_id" placeholder="Transaction ID" value="{{ payment.transaction_id or '' }}">
             </div>
-            <div class="col-md-4">
-              <input class="form-control form-control-sm" name="proof_url" placeholder="Proof URL" value="{{ payment.proof_url or '' }}">
+            <div class="col-md-3">
+              <input class="form-control form-control-sm" name="proof_file" type="file" accept="image/*,.pdf">
             </div>
             <div class="col-md-3">
+              <input class="form-control form-control-sm" name="proof_url" placeholder="Proof URL" value="{{ payment.proof_url or '' }}">
+            </div>
+            <div class="col-md-2">
               <input class="form-control form-control-sm" name="notes" placeholder="Notes" value="{{ payment.notes or '' }}">
             </div>
             <div class="col-md-1">
-              <button class="btn btn-sm btn-outline-primary" type="submit">Save</button>
+              <button class="btn btn-sm btn-outline-primary" type="submit">Upload</button>
             </div>
+            {% if payment.proof_url %}
+            <div class="col-12">
+              <a href="{{ payment.proof_url }}" class="small">View proof</a>
+            </div>
+            {% endif %}
           </form>
         </td>
       </tr>

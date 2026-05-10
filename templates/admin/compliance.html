@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h1 class="h3 mb-0">Compliance</h1>
+  <a class="btn btn-outline-secondary" href="/admin/reports/audit.csv">Audit CSV</a>
+</div>
+
+<div class="bg-white border rounded p-3 mb-4">
+  <div class="d-flex align-items-center justify-content-between">
+    <div>
+      <div class="fw-semibold">Audit retention</div>
+      <div class="text-secondary small">{{ audit_retention_days }} days</div>
+    </div>
+    <form action="/admin/compliance/audit/purge" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-outline-warning" type="submit">Purge old logs</button>
+    </form>
+  </div>
+</div>
+
+<h2 class="h5 mb-3">User data</h2>
+<div class="table-responsive bg-white border rounded mb-4">
+  <table class="table table-hover mb-0">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Email</th>
+        <th>Role</th>
+        <th>Status</th>
+        <th class="text-end">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for member in members %}
+      <tr>
+        <td>{{ member.name }}</td>
+        <td>{{ member.email }}</td>
+        <td>{{ member.role_label }}</td>
+        <td>{{ member.status }}</td>
+        <td class="text-end">
+          <div class="d-inline-flex gap-2">
+            <a class="btn btn-sm btn-outline-secondary" href="/admin/compliance/users/{{ member.id }}/export">Export</a>
+            {% if member.id != user.id %}
+            <form action="/admin/compliance/users/{{ member.id }}/anonymize" method="post">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-danger" type="submit">Anonymize</button>
+            </form>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-secondary">No users yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2 class="h5 mb-3">Recent audit</h2>
+<div class="table-responsive bg-white border rounded">
+  <table class="table table-sm mb-0">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Actor</th>
+        <th>Action</th>
+        <th>Target</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in audit_logs %}
+      <tr>
+        <td>{{ log.timestamp }}</td>
+        <td>{{ log.actor_id or "" }}</td>
+        <td>{{ log.action }}</td>
+        <td>{{ log.target_type }}:{{ log.target_id }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="text-secondary">No audit logs yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

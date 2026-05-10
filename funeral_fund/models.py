@@ -34,7 +34,7 @@ class User(db.Model):
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
     family_members: Mapped[list[FamilyMember]] = orm_relationship(
-        back_populates="user", cascade="all, delete-orphan"
+        back_populates="user", cascade="all, delete-orphan", foreign_keys="FamilyMember.user_id"
     )
     payments: Mapped[list[Payment]] = orm_relationship(
         "Payment", foreign_keys="Payment.member_id", back_populates="member"
@@ -67,11 +67,14 @@ class FamilyMember(db.Model):
     name: Mapped[str]
     category: Mapped[str]
     relationship: Mapped[str | None] = mapped_column(nullable=True)
+    email: Mapped[str | None] = mapped_column(nullable=True)
     dob: Mapped[date | None] = mapped_column(nullable=True)
     status: Mapped[str] = mapped_column(default="active")
+    converted_user_id: Mapped[int | None] = mapped_column(db.ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
-    user: Mapped[User] = orm_relationship(back_populates="family_members")
+    user: Mapped[User] = orm_relationship(back_populates="family_members", foreign_keys=[user_id])
+    converted_user: Mapped[User | None] = orm_relationship(foreign_keys=[converted_user_id])
 
 
 class Fee(db.Model):

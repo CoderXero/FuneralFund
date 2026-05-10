@@ -59,6 +59,51 @@
 </div>
 {% endif %}
 
+<form action="/payments" method="get" class="bg-white border rounded p-3 mb-4">
+  <div class="row g-3 align-items-end">
+    <div class="col-md-2">
+      <label class="form-label" for="history_status">Status</label>
+      <select class="form-select" id="history_status" name="status">
+        <option value="">Any status</option>
+        {% for status in payment_statuses %}
+        <option value="{{ status }}" {% if payment_filters.status == status %}selected{% endif %}>{{ status }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="history_fee_id">Fee name</label>
+      <select class="form-select" id="history_fee_id" name="fee_id">
+        <option value="">Any fee</option>
+        {% for fee_option in fee_options %}
+        <option value="{{ fee_option.id }}" {% if payment_filters.fee_id == fee_option.id|string %}selected{% endif %}>{{ fee_option.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="history_member_id">Member</label>
+      <select class="form-select" id="history_member_id" name="member_id">
+        <option value="">Any member</option>
+        {% for member in members %}
+        <option value="{{ member.id }}" {% if payment_filters.member_id == member.id|string %}selected{% endif %}>{{ member.name }} - {{ member.email }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="history_date_range">Date</label>
+      <select class="form-select" id="history_date_range" name="date_range">
+        <option value="all" {% if payment_filters.date_range == "all" %}selected{% endif %}>All time</option>
+        <option value="week" {% if payment_filters.date_range == "week" %}selected{% endif %}>Week</option>
+        <option value="month" {% if payment_filters.date_range == "month" %}selected{% endif %}>Month</option>
+        <option value="year" {% if payment_filters.date_range == "year" %}selected{% endif %}>Year</option>
+      </select>
+    </div>
+    <div class="col-md-3">
+      <button class="btn btn-outline-primary" type="submit">Retrieve history</button>
+      <a class="btn btn-outline-secondary" href="/payments">Clear</a>
+    </div>
+  </div>
+</form>
+
 <div class="table-responsive bg-white border rounded">
   <table class="table table-hover mb-0">
     <thead>
@@ -67,6 +112,7 @@
         <th>Member</th>
         <th>Method</th>
         <th>Amount</th>
+        <th>Proof</th>
         <th>Status</th>
         <th class="text-end">Actions</th>
       </tr>
@@ -78,6 +124,13 @@
         <td>{{ payment.member.name }}</td>
         <td>{{ payment.method }}</td>
         <td>{{ payment.amount }}</td>
+        <td>
+          {% if payment.proof_url %}
+          <a class="btn btn-sm btn-outline-secondary" href="{{ payment.proof_url }}">Review proof</a>
+          {% else %}
+          <span class="text-secondary small">Not uploaded</span>
+          {% endif %}
+        </td>
         <td>{{ payment.status }}</td>
         <td class="text-end">
           {% if payment.status == "pending" %}
@@ -95,7 +148,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" class="text-secondary">No payments yet.</td></tr>
+      <tr><td colspan="7" class="text-secondary">No payments yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

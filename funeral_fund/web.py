@@ -1,18 +1,23 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
+from pathlib import Path
 from urllib.parse import quote
 
-from flask import Blueprint, Response, current_app, flash, redirect, render_template, request, session, url_for
+from flask import Blueprint, Response, current_app, flash, redirect, render_template, request, send_from_directory, session, url_for
 import qrcode
 import qrcode.image.svg
 from sqlalchemy import func, or_
+from werkzeug.datastructures import FileStorage
+from werkzeug.utils import secure_filename
 
 from .auth import current_user, login_required, require_roles
+from .compliance import anonymize_user, export_user_data_json, purge_old_audit_logs
 from .extensions import db
-from .models import FamilyMember, Fee, Message, Notice, Payment, Setting, User, Vote, VoteCast, VoteOption, utcnow
+from .integrations import ReportExporter
+from .models import AuditLog, FamilyMember, Fee, Message, Notice, Payment, Setting, User, Vote, VoteCast, VoteOption, utcnow
 from .services import (
     FAMILY_CATEGORIES,
     FEE_TYPES,
@@ -24,6 +29,8 @@ from .services import (
     approve_member,
     audit,
     ensure_role_assignment_allowed,
+    normalize_email,
+    promote_member,
     validate_choice,
     verify_payment,
 )
@@ -42,6 +49,10 @@ PAYMENT_OPTION_FIELDS = [
     "handle",
     "payment_url",
 ]
+PAYMENT_PROOF_UPLOAD_DIR = "payment_proofs"
+PAYMENT_PROOF_EXTENSIONS = {"gif", "jpeg", "jpg", "pdf", "png", "webp"}
+PAYMENT_STATUSES = {"pending", "verified", "rejected"}
+PAYMENT_DATE_RANGES = {"all", "week", "month", "year"}
 
 
 @web_bp.get("/favicon.ico")
@@ -80,6 +91,56 @@ def parse_optional_int(value: str | None, field: str) -> int | None:
         return int(value)
     except ValueError as exc:
         raise ValueError(f"{field} must be an integer") from exc
+
+
+def save_payment_proof_file(payment: Payment, upload: FileStorage | None) -> str | None:
+    if upload is None or not upload.filename:
+        return None
+    original_name = secure_filename(upload.filename)
+    extension = original_name.rsplit(".", 1)[-1].lower() if "." in original_name else ""
+    if extension not in PAYMENT_PROOF_EXTENSIONS:
+        raise ValueError("Proof file must be a PDF or image")
+    upload_dir = Path(current_app.instance_path) / "uploads" / PAYMENT_PROOF_UPLOAD_DIR
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"payment-{payment.id}.{extension}"
+    upload.save(upload_dir / filename)
+    return url_for("web.payment_proof_file", filename=filename)
+
+
+def payment_history_filters(include_member: bool = False) -> dict[str, str]:
+    filters = {
+        "status": request.args.get("status", ""),
+        "fee_id": request.args.get("fee_id", ""),
+        "date_range": request.args.get("date_range", "all"),
+    }
+    if filters["status"] not in PAYMENT_STATUSES:
+        filters["status"] = ""
+    if filters["date_range"] not in PAYMENT_DATE_RANGES:
+        filters["date_range"] = "all"
+    if include_member:
+        filters["member_id"] = request.args.get("member_id", "")
+    return filters
+
+
+def apply_payment_history_filters(query, filters: dict[str, str]):
+    if filters.get("status"):
+        query = query.filter(Payment.status == filters["status"])
+    if filters.get("fee_id"):
+        try:
+            query = query.filter(Payment.fee_id == int(filters["fee_id"]))
+        except ValueError:
+            query = query.filter(Payment.fee_id == -1)
+    if filters.get("member_id"):
+        try:
+            query = query.filter(Payment.member_id == int(filters["member_id"]))
+        except ValueError:
+            query = query.filter(Payment.member_id == -1)
+    date_range = filters.get("date_range", "all")
+    days = {"week": 7, "month": 30, "year": 365}.get(date_range)
+    if days:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        query = query.filter(Payment.created_at >= cutoff)
+    return query
 
 
 def fiscal_year_end(today: date | None = None) -> date:
@@ -250,6 +311,7 @@ def member_family_create_page():
             name=request.form["name"],
             category=category,
             relationship=request.form.get("relationship") or None,
+            email=normalize_email(request.form["email"]) if request.form.get("email") else None,
             dob=parse_form_date(request.form.get("dob"), "dob"),
         )
     except ValueError as exc:
@@ -343,12 +405,27 @@ def member_message_send_page():
 def member_payments_page():
     user = current_user()
     settings = settings_dict()
+    filters = payment_history_filters()
+    fee_options = (
+        Fee.query.join(Payment, Payment.fee_id == Fee.id)
+        .filter(Payment.member_id == user.id)
+        .order_by(Fee.name.asc())
+        .distinct()
+        .all()
+    )
+    payments = apply_payment_history_filters(
+        Payment.query.filter_by(member_id=user.id),
+        filters,
+    ).order_by(Payment.created_at.desc())
     return render_template(
         "member/payments.html",
         user=user,
-        payments=Payment.query.filter_by(member_id=user.id).order_by(Payment.created_at.desc()).all(),
+        payments=payments.all(),
         fees=Fee.query.filter_by(active=True).order_by(Fee.created_at.desc()).all(),
         payment_options=active_payment_options(settings),
+        payment_filters=filters,
+        payment_statuses=sorted(PAYMENT_STATUSES),
+        fee_options=fee_options,
     )
 
 
@@ -385,13 +462,32 @@ def member_payment_proof_page(payment_id: int):
     payment = db.get_or_404(Payment, payment_id)
     if payment.member_id != user.id and not user.is_leadership:
         return Response(status=403)
-    payment.proof_url = request.form.get("proof_url") or None
+    try:
+        uploaded_proof_url = save_payment_proof_file(payment, request.files.get("proof_file"))
+    except ValueError as exc:
+        flash(str(exc), "danger")
+        return redirect(url_for("web.member_payments_page"))
+    payment.proof_url = uploaded_proof_url or request.form.get("proof_url") or payment.proof_url
     payment.transaction_id = request.form.get("transaction_id") or None
     payment.notes = request.form.get("notes") or None
     audit(user, "payment.proof", "payment", payment.id, source="web")
     db.session.commit()
     flash("Payment proof saved.", "success")
     return redirect(url_for("web.member_payments_page"))
+
+
+@web_bp.get("/payments/proofs/<path:filename>")
+@login_required
+def payment_proof_file(filename: str):
+    user = current_user()
+    expected_url = url_for("web.payment_proof_file", filename=filename)
+    payment = Payment.query.filter_by(proof_url=expected_url).one_or_none()
+    if payment is None:
+        return Response(status=404)
+    if payment.member_id != user.id and not user.is_leadership:
+        return Response(status=403)
+    upload_dir = Path(current_app.instance_path) / "uploads" / PAYMENT_PROOF_UPLOAD_DIR
+    return send_from_directory(upload_dir, filename)
 
 
 @web_bp.get("/my/voting")
@@ -445,6 +541,81 @@ def admin_page():
         open_votes=Vote.query.filter(Vote.open_date <= date.today(), Vote.close_date >= date.today()).count(),
         leadership_messages=Message.query.filter_by(audience="leadership", archived_at=None).count(),
     )
+
+
+@web_bp.get("/admin/compliance")
+@require_roles("admin")
+def admin_compliance_page():
+    return render_template(
+        "admin/compliance.html",
+        user=current_user(),
+        members=User.query.order_by(User.created_at.desc()).all(),
+        audit_logs=AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(100).all(),
+        audit_retention_days=current_app.config["AUDIT_RETENTION_DAYS"],
+    )
+
+
+@web_bp.get("/admin/reports/members.csv")
+@require_roles("admin", "community_admin")
+def admin_members_csv():
+    return Response(
+        ReportExporter().members_csv(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=members.csv"},
+    )
+
+
+@web_bp.get("/admin/reports/payments.csv")
+@require_roles("admin", "community_admin")
+def admin_payments_csv():
+    return Response(
+        ReportExporter().monthly_payments_csv(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=payments.csv"},
+    )
+
+
+@web_bp.get("/admin/reports/audit.csv")
+@require_roles("admin")
+def admin_audit_csv():
+    return Response(
+        ReportExporter().audit_csv(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=audit.csv"},
+    )
+
+
+@web_bp.get("/admin/compliance/users/<int:member_id>/export")
+@require_roles("admin")
+def admin_user_export(member_id: int):
+    return Response(
+        export_user_data_json(db.get_or_404(User, member_id)),
+        mimetype="application/json",
+        headers={"Content-Disposition": f"attachment; filename=user-{member_id}-export.json"},
+    )
+
+
+@web_bp.post("/admin/compliance/users/<int:member_id>/anonymize")
+@require_roles("admin")
+def admin_user_anonymize(member_id: int):
+    actor = current_user()
+    member = db.get_or_404(User, member_id)
+    if member.id == actor.id:
+        flash("Admins cannot anonymize their own active account.", "danger")
+        return redirect(url_for("web.admin_compliance_page"))
+    anonymize_user(member, actor)
+    db.session.commit()
+    flash("User anonymized.", "warning")
+    return redirect(url_for("web.admin_compliance_page"))
+
+
+@web_bp.post("/admin/compliance/audit/purge")
+@require_roles("admin")
+def admin_audit_purge():
+    count = purge_old_audit_logs(current_app.config["AUDIT_RETENTION_DAYS"], current_user())
+    db.session.commit()
+    flash(f"Purged {count} old audit log entries.", "success")
+    return redirect(url_for("web.admin_compliance_page"))
 
 
 @web_bp.get("/admin/messages")
@@ -527,7 +698,7 @@ def members_create_page():
         ensure_role_assignment_allowed(actor, role)
         validate_choice(status, "status", STATUSES)
         member = User(
-            email=request.form["email"],
+            email=normalize_email(request.form["email"]),
             name=request.form.get("name") or request.form["email"],
             role=role,
             status=status,
@@ -557,8 +728,10 @@ def members_approve_page(member_id: int):
 def members_promote_page(member_id: int):
     actor = current_user()
     member = db.get_or_404(User, member_id)
-    member.role = "community_admin"
-    audit(actor, "member.promote", "user", member.id, source="web")
+    try:
+        promote_member(member, actor, source="web")
+    except (PermissionError, ValueError) as exc:
+        return flash_form_error(exc, "web.members_page")
     db.session.commit()
     flash("Member promoted to leadership.", "success")
     return redirect(url_for("web.members_page"))
@@ -579,11 +752,18 @@ def members_suspend_page(member_id: int):
 @web_bp.get("/payments")
 @require_roles("admin", "community_admin")
 def payments_page():
+    filters = payment_history_filters(include_member=True)
+    payments = apply_payment_history_filters(Payment.query, filters).order_by(Payment.created_at.desc())
+    fee_options = Fee.query.join(Payment, Payment.fee_id == Fee.id).order_by(Fee.name.asc()).distinct().all()
     return render_template(
         "payments/index.html",
         user=current_user(),
-        payments=Payment.query.order_by(Payment.created_at.desc()).all(),
+        payments=payments.all(),
         fees=Fee.query.order_by(Fee.created_at.desc()).all(),
+        members=User.query.order_by(User.name.asc()).all(),
+        payment_filters=filters,
+        payment_statuses=sorted(PAYMENT_STATUSES),
+        fee_options=fee_options,
     )
 
 

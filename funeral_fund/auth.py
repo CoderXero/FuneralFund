@@ -8,6 +8,7 @@ from flask import Blueprint, abort, current_app, g, redirect, request, session, 
 
 from .extensions import db, oauth
 from .models import User
+from .services import normalize_email
 
 F = TypeVar("F", bound=Callable)
 auth_bp = Blueprint("auth", __name__)
@@ -62,6 +63,7 @@ def upsert_user(
     groups: list[str],
     idp_sub: str | None = None,
 ) -> User:
+    email = normalize_email(email)
     user = User.query.filter_by(email=email).one_or_none()
     role = role_from_groups(groups)
     if user is None:

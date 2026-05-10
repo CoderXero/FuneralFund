@@ -107,7 +107,7 @@ If a route fails with `sqlite3.OperationalError: no such table`, stop the server
 
 Sign in through `/auth/login` with IDP credentials. The app no longer creates a hard-coded local admin user.
 
-Next session focus: test the leadership message workflows end to end, including broadcast delivery, direct delivery by email, archive visibility, and fiscal-year retention dates.
+Next session focus: wire real provider SDKs/API contracts into the integration service boundaries once credentials and provider webhook specifications are available.
 
 ## Current Scope
 
@@ -124,7 +124,12 @@ Implemented:
 * Leadership broadcast, direct member messaging by email, and message archive workflow
 * Leadership payment settings for Cash App, Venmo, and Zelle with QR codes
 * Manual payment proof workflow
+* Email normalization and protected admin role promotion rules
+* Dependant age-out conversion into pending member accounts
+* CSV report exports for members, payments, and audit logs
+* Admin compliance workspace for user export, anonymization, and audit retention purge
+* Payment, WhatsApp, and Blob Storage integration boundaries with explicit setup errors
 * Basic Jinja2 dashboard pages
-* Core lifecycle tests
+* Core lifecycle, migration, integration-boundary, and compliance tests
 
 Deferred production integrations are documented in [funeral_fund-spec.md](funeral_fund-spec.md).

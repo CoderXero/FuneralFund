@@ -87,6 +87,21 @@ def test_group_claims_map_to_app_roles():
     assert role_from_groups(["community_member"]) == "community_user"
 
 
+def test_development_header_auth_normalizes_email(client):
+    response = client.get(
+        "/dashboard",
+        headers={
+            "X-User-Email": " Member@Example.Test ",
+            "X-User-Name": "Member",
+            "X-User-Groups": "community_member",
+        },
+    )
+
+    assert response.status_code == 200
+    with client.application.app_context():
+        assert User.query.filter_by(email="member@example.test").one()
+
+
 def test_oauth_login_requires_client_secret():
     class MissingSecretConfig(ProductionConfig):
         CLIENT_SECRET = ""

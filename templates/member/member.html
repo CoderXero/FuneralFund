@@ -36,6 +36,10 @@
       <input class="form-control" id="relationship" name="relationship">
     </div>
     <div class="col-md-3">
+      <label class="form-label" for="email">Email</label>
+      <input class="form-control" id="email" name="email" type="email">
+    </div>
+    <div class="col-md-2">
       <label class="form-label" for="category">Category</label>
       <select class="form-select" id="category" name="category">
         <option value="dependant">Dependant</option>
@@ -44,7 +48,7 @@
         <option value="primary">Primary</option>
       </select>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-1">
       <label class="form-label" for="dob">Date of birth</label>
       <input class="form-control" id="dob" name="dob" type="date">
     </div>
@@ -60,6 +64,7 @@
       <tr>
         <th>Name</th>
         <th>Relationship</th>
+        <th>Email</th>
         <th>Category</th>
         <th>Status</th>
         <th class="text-end">Actions</th>
@@ -70,6 +75,7 @@
       <tr>
         <td>{{ family.name }}</td>
         <td>{{ family.relationship or "" }}</td>
+        <td>{{ family.email or "" }}</td>
         <td>{{ family.category }}</td>
         <td>{{ family.status }}</td>
         <td class="text-end">
@@ -80,7 +86,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="5" class="text-secondary">No family members yet.</td></tr>
+      <tr><td colspan="6" class="text-secondary">No family members yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

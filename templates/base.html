@@ -32,6 +32,9 @@
         {% endif %}
       </div>
     </nav>
+    {% if user.is_leadership and (request.path.startswith('/admin') or request.path in ['/members', '/payments', '/voting']) %}
+    {% include "admin/_tabs.html" %}
+    {% endif %}
     {% endif %}
     <main class="container py-4">
       {% with messages = get_flashed_messages(with_categories=true) %}

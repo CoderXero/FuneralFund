@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+from io import BytesIO
 
 from funeral_fund.extensions import db
 from funeral_fund.models import FamilyMember, Fee, Message, Notice, Payment, Setting, User, Vote, VoteCast, VoteOption
@@ -57,6 +58,19 @@ def test_leadership_nav_includes_admin_tab(client, leader_headers):
     assert b'href="/my/settings"' in response.data
     assert b'href="/my/messages"' in response.data
     assert b'href="/admin"' in response.data
+
+
+def test_admin_pages_show_pinned_admin_operation_tabs(client, leader_headers):
+    response = client.get("/admin", headers=leader_headers)
+
+    assert response.status_code == 200
+    assert b"position-sticky" in response.data
+    assert b'href="/members">Manage members' in response.data
+    assert b'href="/payments">Manage Payments' in response.data
+    assert b'href="/voting">Manage voting' in response.data
+    assert b'href="/admin/messages">Manage messages' in response.data
+    assert b'href="/admin/reports/members.csv">Members CSV' in response.data
+    assert b'href="/admin/reports/payments.csv">Payment CSV' in response.data
 
 
 def test_member_nav_includes_self_service_pages(client, member_headers):
@@ -212,6 +226,7 @@ def test_member_can_manage_family_from_ui(client, member_headers, app):
         data={
             "name": "Child One",
             "relationship": "Child",
+            "email": "Child.One@Example.Test",
             "category": "dependant",
             "dob": "2020-01-01",
         },
@@ -221,6 +236,7 @@ def test_member_can_manage_family_from_ui(client, member_headers, app):
     assert response.status_code == 302
     with app.app_context():
         family = FamilyMember.query.filter_by(name="Child One").one()
+        assert family.email == "child.one@example.test"
         family_id = family.id
 
     response = client.post(f"/my/family/{family_id}/delete", headers=member_headers)
@@ -303,6 +319,150 @@ def test_member_can_start_payment_and_save_proof_from_ui(client, member_headers,
         payment = db.session.get(Payment, payment_id)
         assert payment.transaction_id == "TX123"
         assert payment.proof_url == "https://example.test/proof.png"
+
+
+def test_member_can_filter_own_payment_history(client, member_headers, app):
+    client.get("/dashboard", headers=member_headers)
+    with app.app_context():
+        member = User.query.filter_by(email="member@example.test").one()
+        monthly_fee = Fee(name="Monthly Dues", type="recurring", amount="25.00", recurring_interval="monthly")
+        event_fee = Fee(name="Event Support", type="one_time", amount="20.00")
+        db.session.add_all([monthly_fee, event_fee])
+        db.session.flush()
+        verified = Payment(member_id=member.id, fee_id=monthly_fee.id, method="manual", amount="10.00", status="verified")
+        pending = Payment(member_id=member.id, fee_id=event_fee.id, method="manual", amount="20.00", status="pending")
+        old = Payment(
+            member_id=member.id,
+            fee_id=monthly_fee.id,
+            method="manual",
+            amount="30.00",
+            status="verified",
+            created_at=datetime.now(timezone.utc) - timedelta(days=40),
+        )
+        db.session.add_all([verified, pending, old])
+        db.session.commit()
+        verified_id = verified.id
+        pending_id = pending.id
+        old_id = old.id
+        event_fee_id = event_fee.id
+
+    response = client.get("/my/payments?status=verified&date_range=month", headers=member_headers)
+
+    assert response.status_code == 200
+    assert b'<select class="form-select" id="history_fee_id" name="fee_id">' in response.data
+    assert b"Monthly Dues" in response.data
+    assert b"Event Support" in response.data
+    assert f"<td>{verified_id}</td>".encode() in response.data
+    assert f"<td>{pending_id}</td>".encode() not in response.data
+    assert f"<td>{old_id}</td>".encode() not in response.data
+
+    response = client.get(f"/my/payments?fee_id={event_fee_id}&date_range=all", headers=member_headers)
+
+    assert f"<td>{pending_id}</td>".encode() in response.data
+    assert f"<td>{verified_id}</td>".encode() not in response.data
+
+
+def test_leader_can_filter_payment_history_by_member_status_and_date(client, leader_headers, member_headers, app):
+    client.get("/dashboard", headers=member_headers)
+    client.get("/dashboard", headers=leader_headers)
+    with app.app_context():
+        member = User.query.filter_by(email="member@example.test").one()
+        leader = User.query.filter_by(email="leader@example.test").one()
+        monthly_fee = Fee(name="Monthly Dues", type="recurring", amount="25.00", recurring_interval="monthly")
+        support_fee = Fee(name="Support Notice", type="one_time", amount="40.00")
+        db.session.add_all([monthly_fee, support_fee])
+        db.session.flush()
+        target = Payment(member_id=member.id, fee_id=support_fee.id, method="manual", amount="10.00", status="rejected")
+        other_member = Payment(member_id=leader.id, fee_id=support_fee.id, method="manual", amount="20.00", status="rejected")
+        wrong_status = Payment(member_id=member.id, fee_id=monthly_fee.id, method="manual", amount="30.00", status="pending")
+        old = Payment(
+            member_id=member.id,
+            fee_id=support_fee.id,
+            method="manual",
+            amount="40.00",
+            status="rejected",
+            created_at=datetime.now(timezone.utc) - timedelta(days=400),
+        )
+        db.session.add_all([target, other_member, wrong_status, old])
+        db.session.commit()
+        member_id = member.id
+        target_id = target.id
+        other_member_id = other_member.id
+        wrong_status_id = wrong_status.id
+        old_id = old.id
+
+    response = client.get(
+        f"/payments?member_id={member_id}&status=rejected&date_range=year",
+        headers=leader_headers,
+    )
+
+    assert response.status_code == 200
+    assert b'<select class="form-select" id="history_fee_id" name="fee_id">' in response.data
+    assert b"Support Notice" in response.data
+    assert b"Monthly Dues" in response.data
+    assert f"<td>{target_id}</td>".encode() in response.data
+    assert f"<td>{other_member_id}</td>".encode() not in response.data
+    assert f"<td>{wrong_status_id}</td>".encode() not in response.data
+    assert f"<td>{old_id}</td>".encode() not in response.data
+
+
+def test_member_can_upload_payment_proof_for_leadership_review(client, member_headers, leader_headers, app):
+    client.get("/dashboard", headers=member_headers)
+    with app.app_context():
+        member = User.query.filter_by(email="member@example.test").one()
+        payment = Payment(member_id=member.id, method="manual", amount="25.00")
+        db.session.add(payment)
+        db.session.commit()
+        payment_id = payment.id
+
+    response = client.post(
+        f"/my/payments/{payment_id}/proof",
+        data={
+            "transaction_id": "TX-UPLOAD",
+            "notes": "Receipt attached",
+            "proof_file": (BytesIO(b"%PDF-1.4 proof"), "receipt.pdf"),
+        },
+        headers=member_headers,
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 302
+    with app.app_context():
+        payment = db.session.get(Payment, payment_id)
+        assert payment.proof_url == f"/payments/proofs/payment-{payment_id}.pdf"
+
+    review = client.get("/payments", headers=leader_headers)
+    assert b"Review proof" in review.data
+    assert f"/payments/proofs/payment-{payment_id}.pdf".encode() in review.data
+
+    proof = client.get(f"/payments/proofs/payment-{payment_id}.pdf", headers=leader_headers)
+    assert proof.status_code == 200
+    assert proof.data == b"%PDF-1.4 proof"
+
+
+def test_other_member_cannot_view_payment_proof(client, member_headers, app):
+    client.get("/dashboard", headers=member_headers)
+    with app.app_context():
+        member = User.query.filter_by(email="member@example.test").one()
+        payment = Payment(
+            member_id=member.id,
+            method="manual",
+            amount="25.00",
+            proof_url="/payments/proofs/payment-private.pdf",
+        )
+        db.session.add(payment)
+        db.session.commit()
+
+    response = client.get(
+        "/payments/proofs/payment-private.pdf",
+        headers={
+            "X-User-Email": "other@example.test",
+            "X-User-Name": "Other",
+            "X-User-Groups": "community_member",
+        },
+    )
+
+    assert response.status_code == 403
 
 
 def test_member_can_cast_vote_from_ui(client, member_headers, app):
@@ -505,6 +665,35 @@ def test_member_message_form_only_targets_leadership(client, member_headers):
     assert b"Send to leadership" in response.data
     assert b"Direct recipient" not in response.data
     assert b"Audience" not in response.data
+
+
+def test_admin_can_export_and_anonymize_user(client, admin_headers, member_headers, app):
+    client.get("/dashboard", headers=member_headers)
+    with app.app_context():
+        member = User.query.filter_by(email="member@example.test").one()
+        member_id = member.id
+
+    export_response = client.get(f"/admin/compliance/users/{member_id}/export", headers=admin_headers)
+
+    assert export_response.status_code == 200
+    assert export_response.mimetype == "application/json"
+    assert b"member@example.test" in export_response.data
+
+    response = client.post(f"/admin/compliance/users/{member_id}/anonymize", headers=admin_headers)
+
+    assert response.status_code == 302
+    with app.app_context():
+        member = db.session.get(User, member_id)
+        assert member.email == f"deleted-user-{member_id}@deleted.local"
+        assert member.name == "Deleted User"
+
+
+def test_admin_reports_csv(client, admin_headers):
+    response = client.get("/admin/reports/members.csv", headers=admin_headers)
+
+    assert response.status_code == 200
+    assert response.mimetype == "text/csv"
+    assert b"id,email,name,role,status,dob" in response.data
 
 
 def db_value(key: str) -> str:

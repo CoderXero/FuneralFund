@@ -37,12 +37,9 @@
   </div>
 </div>
 
+{% if user.is_admin %}
 <div class="bg-white border rounded p-3">
-  <div class="d-flex gap-2 flex-wrap">
-    <a class="btn btn-outline-primary" href="/members">Manage members</a>
-    <a class="btn btn-outline-primary" href="/payments">Manage payments</a>
-    <a class="btn btn-outline-primary" href="/voting">Manage voting</a>
-    <a class="btn btn-outline-primary" href="/admin/messages">Manage messages</a>
-  </div>
+  <a class="btn btn-outline-primary" href="/admin/compliance">Compliance</a>
 </div>
+{% endif %}
 {% endblock %}

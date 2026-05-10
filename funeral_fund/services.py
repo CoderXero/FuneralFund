@@ -18,6 +18,13 @@ PAYMENT_METHODS = {"cashapp", "venmo", "zelle", "manual"}
 MESSAGE_AUDIENCES = {"all", "community_user", "community_admin", "leadership"}
 
 
+def normalize_email(email: str) -> str:
+    normalized = email.strip().lower()
+    if not normalized or "@" not in normalized:
+        raise ValueError("email must be a valid email address")
+    return normalized
+
+
 def age_on(dob: date | None, today: date | None = None) -> int | None:
     if dob is None:
         return None
@@ -62,6 +69,16 @@ def approve_member(member: User, actor: User) -> User:
     return member
 
 
+def promote_member(member: User, actor: User, **metadata) -> User:
+    if member.role == "admin" and not actor.is_admin:
+        raise PermissionError("only admins can change admin members")
+    if member.role != "community_user":
+        raise ValueError("only community members can be promoted")
+    member.role = "community_admin"
+    audit(actor, "member.promote", "user", member.id, **metadata)
+    return member
+
+
 def verify_payment(payment: Payment, actor: User, status: str) -> Payment:
     if status not in {"verified", "rejected"}:
         raise ValueError("payment status must be verified or rejected")
@@ -77,9 +94,32 @@ def age_out_dependants(today: date | None = None) -> list[FamilyMember]:
     converted: list[FamilyMember] = []
     dependants = FamilyMember.query.filter_by(category="dependant", status="active").all()
     for dependant in dependants:
-        if age_on(dependant.dob, today) is not None and age_on(dependant.dob, today) >= 21:
-            dependant.category = "pending_member"
-            dependant.status = "pending"
-            converted.append(dependant)
-            audit(None, "family.age_out", "family_member", dependant.id, name=dependant.name)
+        dependant_age = age_on(dependant.dob, today)
+        if dependant_age is None or dependant_age < 21:
+            continue
+        dependant.category = "pending_member"
+        dependant.status = "pending"
+        if dependant.converted_user_id is None:
+            email = normalize_email(dependant.email) if dependant.email else f"pending-family-{dependant.id}@pending.local"
+            user = User.query.filter_by(email=email).one_or_none()
+            if user is None:
+                user = User(
+                    email=email,
+                    name=dependant.name,
+                    role="community_user",
+                    status="pending",
+                    dob=dependant.dob,
+                )
+                db.session.add(user)
+                db.session.flush()
+            dependant.converted_user_id = user.id
+        converted.append(dependant)
+        audit(
+            None,
+            "family.age_out",
+            "family_member",
+            dependant.id,
+            name=dependant.name,
+            converted_user_id=dependant.converted_user_id,
+        )
     return converted
